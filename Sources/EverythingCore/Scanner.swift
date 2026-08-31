@@ -1,56 +1,63 @@
 import Foundation
 import CoreServices
 
-protocol ScannerDelegate: AnyObject {
-    func scanner(_ scanner: Scanner, didAdd batch: [FileEntry], total: Int)
-    func scannerDidFinish(_ scanner: Scanner, total: Int)
-    func scannerDidFail(_ scanner: Scanner, error: Error)
+public protocol FileScannerDelegate: AnyObject {
+    func scanner(_ scanner: FileScanner, didAdd batch: [FileEntry], total: Int)
+    func scannerDidFinish(_ scanner: FileScanner, total: Int)
+    func scannerDidFail(_ scanner: FileScanner, error: Error)
 }
 
-final class Scanner: @unchecked Sendable {
-    weak var delegate: ScannerDelegate?
+public final class FileScanner: @unchecked Sendable {
+    public weak var delegate: FileScannerDelegate?
 
     private let index: FileIndex
+    private let rootPath: String
+    private let policy: ScanPolicy
+    private let enableWatch: Bool
+    private let notifyOnMain: Bool
     private let queue = DispatchQueue(label: "everything.scanner", qos: .utility)
     private var stopFlag = false
     private var eventStream: FSEventStreamRef?
-    private let home = NSHomeDirectory()
 
-    private let skipNames: Set<String> = [
-        ".Trash", ".Trashes", "node_modules", ".git", "__pycache__",
-        ".venv", "venv", ".npm", ".pnpm-store", ".build", ".gradle",
-        ".swiftpm", "DerivedData", "CoreSimulator",
+    private static let resourceKeys: Set<URLResourceKey> = [
+        .isRegularFileKey,
+        .isDirectoryKey,
+        .isSymbolicLinkKey,
+        .isPackageKey,
+        .fileSizeKey,
+        .totalFileAllocatedSizeKey,
+        .contentModificationDateKey,
+        .isUbiquitousItemKey,
+        .ubiquitousItemDownloadingStatusKey,
+        .nameKey,
     ]
 
-    private let skipRelativePrefixes = [
-        "Library/Caches",
-        "Library/Logs",
-        "Library/Developer",
-        "Library/Containers",
-        "Library/Metadata",
-        "Library/Mail",
-        "Library/Safari",
-        "Library/Mobile Documents/com~apple~CloudDocs/Desktop",
-        "Library/Mobile Documents/com~apple~CloudDocs/Documents",
-        "Library/Mobile Documents/com~apple~CloudDocs/Downloads",
-    ]
-
-    init(index: FileIndex) {
+    public init(
+        index: FileIndex,
+        root: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+        policy: ScanPolicy = .default,
+        enableWatch: Bool = true,
+        notifyOnMain: Bool = true
+    ) {
         self.index = index
+        self.rootPath = root.resolvingSymlinksInPath().path
+        self.policy = policy
+        self.enableWatch = enableWatch
+        self.notifyOnMain = notifyOnMain
     }
 
-    func start() {
+    public func start() {
         queue.async { [weak self] in
             self?.scan()
         }
     }
 
-    func stop() {
+    public func stop() {
         stopFlag = true
         stopEvents()
     }
 
-    func rebuild() {
+    public func rebuild() {
         stopFlag = true
         queue.async { [weak self] in
             guard let self else { return }
@@ -61,30 +68,21 @@ final class Scanner: @unchecked Sendable {
         }
     }
 
-    private func scan() {
-        let keys: Set<URLResourceKey> = [
-            .isRegularFileKey,
-            .isDirectoryKey,
-            .isSymbolicLinkKey,
-            .isPackageKey,
-            .fileSizeKey,
-            .totalFileAllocatedSizeKey,
-            .contentModificationDateKey,
-            .isUbiquitousItemKey,
-            .ubiquitousItemDownloadingStatusKey,
-            .nameKey,
-        ]
+    public func scanSynchronously() {
+        stopFlag = false
+        scan()
+    }
 
-        let root = URL(fileURLWithPath: home, isDirectory: true)
+    private func scan() {
+        let root = URL(fileURLWithPath: rootPath, isDirectory: true)
         guard let enumerator = FileManager.default.enumerator(
             at: root,
-            includingPropertiesForKeys: Array(keys),
+            includingPropertiesForKeys: Array(Self.resourceKeys),
             options: [.skipsPackageDescendants],
             errorHandler: { _, _ in true }
         ) else {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.delegate?.scannerDidFail(self, error: NSError(
+            notify { delegate in
+                delegate.scannerDidFail(self, error: NSError(
                     domain: "Everything",
                     code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Could not start scan"]
@@ -106,32 +104,31 @@ final class Scanner: @unchecked Sendable {
             batch.removeAll(keepingCapacity: true)
             lastFlush = Date()
             let total = index.add(outgoing)
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.delegate?.scanner(self, didAdd: outgoing, total: total)
+            notify { delegate in
+                delegate.scanner(self, didAdd: outgoing, total: total)
             }
         }
 
-        if let homeEntry = makeEntry(for: root, keys: keys) {
-            batch.append(homeEntry)
+        if let rootEntry = makeEntry(for: root, keys: Self.resourceKeys) {
+            batch.append(rootEntry)
         }
 
         while let item = enumerator.nextObject() as? URL {
             if stopFlag { break }
 
-            let values = (try? item.resourceValues(forKeys: keys)) ?? URLResourceValues()
+            let values = (try? item.resourceValues(forKeys: Self.resourceKeys)) ?? URLResourceValues()
             let isDirectory = values.isDirectory == true
             let isPackage = values.isPackage == true
             let name = item.lastPathComponent
             let relative = relativePath(item.path)
 
-            if shouldSkipDescending(relative: relative, name: name) || isPackage {
+            if policy.shouldSkipDescending(relative: relative, name: name) || isPackage {
                 if isDirectory {
                     enumerator.skipDescendants()
                 }
             }
 
-            if skipNames.contains(name), name.hasPrefix(".") {
+            if policy.shouldOmitEntry(name: name) {
                 continue
             }
 
@@ -144,40 +141,25 @@ final class Scanner: @unchecked Sendable {
         flush(force: true)
 
         let total = index.count
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.delegate?.scannerDidFinish(self, total: total)
+        notify { delegate in
+            delegate.scannerDidFinish(self, total: total)
         }
 
-        if !stopFlag {
+        if !stopFlag, enableWatch {
             startEvents()
         }
     }
 
-    private func relativePath(_ path: String) -> String {
-        if path == home { return "" }
-        if path.hasPrefix(home + "/") {
-            return String(path.dropFirst(home.count + 1))
+    public func relativePath(_ path: String) -> String {
+        let normalized = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        if normalized == rootPath { return "" }
+        if normalized.hasPrefix(rootPath + "/") {
+            return String(normalized.dropFirst(rootPath.count + 1))
         }
-        return path
+        return normalized
     }
 
-    private func shouldSkipDescending(relative: String, name: String) -> Bool {
-        if skipNames.contains(name) { return true }
-        for prefix in skipRelativePrefixes {
-            if relative == prefix || relative.hasPrefix(prefix + "/") {
-                return true
-            }
-        }
-        return false
-    }
-
-    private func makeEntry(for url: URL, keys: Set<URLResourceKey>) -> FileEntry? {
-        let values = (try? url.resourceValues(forKeys: keys)) ?? URLResourceValues()
-        return makeEntry(for: url, values: values)
-    }
-
-    private func makeEntry(for url: URL, values: URLResourceValues) -> FileEntry? {
+    public static func makeEntry(for url: URL, values: URLResourceValues) -> FileEntry? {
         let name = values.name ?? url.lastPathComponent
         guard !name.isEmpty else { return nil }
         let isDirectory = values.isDirectory == true
@@ -195,8 +177,9 @@ final class Scanner: @unchecked Sendable {
             return false
         }()
 
-        let path = url.path
-        let directory = url.deletingLastPathComponent().path
+        let resolved = url.resolvingSymlinksInPath()
+        let path = resolved.path
+        let directory = resolved.deletingLastPathComponent().path
         return FileEntry(
             name: name,
             nameLower: name.lowercased(),
@@ -210,6 +193,24 @@ final class Scanner: @unchecked Sendable {
         )
     }
 
+    private func makeEntry(for url: URL, keys: Set<URLResourceKey>) -> FileEntry? {
+        let values = (try? url.resourceValues(forKeys: keys)) ?? URLResourceValues()
+        return Self.makeEntry(for: url, values: values)
+    }
+
+    private func makeEntry(for url: URL, values: URLResourceValues) -> FileEntry? {
+        Self.makeEntry(for: url, values: values)
+    }
+
+    private func notify(_ body: @escaping (FileScannerDelegate) -> Void) {
+        guard let delegate else { return }
+        if notifyOnMain {
+            DispatchQueue.main.async { body(delegate) }
+        } else {
+            body(delegate)
+        }
+    }
+
     private func startEvents() {
         stopEvents()
         var context = FSEventStreamContext(
@@ -219,12 +220,12 @@ final class Scanner: @unchecked Sendable {
             release: nil,
             copyDescription: nil
         )
-        let paths = [home] as CFArray
+        let paths = [rootPath] as CFArray
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
             { _, info, count, pathsPointer, flagsPointer, _ in
                 guard let info else { return }
-                let scanner = Unmanaged<Scanner>.fromOpaque(info).takeUnretainedValue()
+                let scanner = Unmanaged<FileScanner>.fromOpaque(info).takeUnretainedValue()
                 let paths = UnsafeBufferPointer(
                     start: pathsPointer.assumingMemoryBound(to: UnsafePointer<CChar>.self),
                     count: count
@@ -265,17 +266,6 @@ final class Scanner: @unchecked Sendable {
         if stopFlag { return }
         var added: [FileEntry] = []
         var removed: [String] = []
-        let keys: Set<URLResourceKey> = [
-            .isRegularFileKey,
-            .isDirectoryKey,
-            .isPackageKey,
-            .fileSizeKey,
-            .totalFileAllocatedSizeKey,
-            .contentModificationDateKey,
-            .isUbiquitousItemKey,
-            .ubiquitousItemDownloadingStatusKey,
-            .nameKey,
-        ]
 
         for path in paths {
             var isDir: ObjCBool = false
@@ -283,10 +273,10 @@ final class Scanner: @unchecked Sendable {
                 let url = URL(fileURLWithPath: path, isDirectory: isDir.boolValue)
                 let relative = relativePath(path)
                 let name = url.lastPathComponent
-                if shouldSkipDescending(relative: relative, name: name) {
+                if policy.shouldSkipDescending(relative: relative, name: name) {
                     continue
                 }
-                if let entry = makeEntry(for: url, keys: keys) {
+                if let entry = makeEntry(for: url, keys: Self.resourceKeys) {
                     added.append(entry)
                 }
             } else {
@@ -303,9 +293,8 @@ final class Scanner: @unchecked Sendable {
         } else {
             total = index.count
         }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.delegate?.scanner(self, didAdd: added, total: total)
+        notify { delegate in
+            delegate.scanner(self, didAdd: added, total: total)
         }
     }
 

@@ -1,4 +1,5 @@
 import AppKit
+import EverythingCore
 
 final class SearchField: NSTextField {
     var onMoveToResults: (() -> Void)?
@@ -55,9 +56,9 @@ final class ResultsTableView: NSTableView {
     }
 }
 
-final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, ScannerDelegate {
+final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, FileScannerDelegate {
     private let index = FileIndex()
-    private lazy var scanner = Scanner(index: index)
+    private lazy var scanner = FileScanner(index: index)
 
     private var searchField: SearchField!
     private var tableView: ResultsTableView!
@@ -570,13 +571,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     // MARK: - Scanner
 
-    func scanner(_ scanner: Scanner, didAdd batch: [FileEntry], total: Int) {
+    func scanner(_ scanner: FileScanner, didAdd batch: [FileEntry], total: Int) {
         indexedCount = total
         scheduleSearchRefresh()
         updateStatus()
     }
 
-    func scannerDidFinish(_ scanner: Scanner, total: Int) {
+    func scannerDidFinish(_ scanner: FileScanner, total: Int) {
         isIndexing = false
         indexedCount = total
         lastSearch = nil
@@ -584,7 +585,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         updateStatus()
     }
 
-    func scannerDidFail(_ scanner: Scanner, error: Error) {
+    func scannerDidFail(_ scanner: FileScanner, error: Error) {
         isIndexing = false
         statusLeft.stringValue = error.localizedDescription
     }

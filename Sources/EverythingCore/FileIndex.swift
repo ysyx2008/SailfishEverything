@@ -1,47 +1,19 @@
 import Foundation
 
-struct FileEntry: Sendable {
-    let name: String
-    let nameLower: String
-    let directory: String
-    let path: String
-    let pathLower: String
-    let size: Int64?
-    let modified: Date?
-    let isDirectory: Bool
-    let isCloudOnly: Bool
-}
-
-struct SearchOptions: Equatable, Sendable {
-    var matchCase = false
-    var matchWholeWord = false
-    var matchPath = false
-}
-
-enum SortColumn: Int, Sendable {
-    case name = 0
-    case path = 1
-    case size = 2
-    case modified = 3
-}
-
-struct SortState: Equatable, Sendable {
-    var column: SortColumn = .name
-    var ascending = true
-}
-
-final class FileIndex: @unchecked Sendable {
+public final class FileIndex: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [FileEntry] = []
     private var seen = Set<String>()
 
-    var count: Int {
+    public init() {}
+
+    public var count: Int {
         lock.lock()
         defer { lock.unlock() }
         return entries.count
     }
 
-    func reset() {
+    public func reset() {
         lock.lock()
         entries.removeAll(keepingCapacity: true)
         seen.removeAll(keepingCapacity: true)
@@ -49,7 +21,7 @@ final class FileIndex: @unchecked Sendable {
     }
 
     @discardableResult
-    func add(_ batch: [FileEntry]) -> Int {
+    public func add(_ batch: [FileEntry]) -> Int {
         lock.lock()
         defer { lock.unlock() }
         entries.reserveCapacity(entries.count + batch.count)
@@ -61,7 +33,7 @@ final class FileIndex: @unchecked Sendable {
         return entries.count
     }
 
-    func remove(paths: [String]) {
+    public func remove(paths: [String]) {
         guard !paths.isEmpty else { return }
         lock.lock()
         let doomed = Set(paths)
@@ -72,11 +44,11 @@ final class FileIndex: @unchecked Sendable {
         lock.unlock()
     }
 
-    func search(
+    public func search(
         query: String,
-        options: SearchOptions,
-        sort: SortState,
-        previous: (query: String, options: SearchOptions, indices: [Int])?
+        options: SearchOptions = SearchOptions(),
+        sort: SortState = SortState(),
+        previous: (query: String, options: SearchOptions, indices: [Int])? = nil
     ) -> [Int] {
         let terms = Self.terms(from: query)
         lock.lock()
@@ -108,26 +80,35 @@ final class FileIndex: @unchecked Sendable {
         return sorted
     }
 
-    func entries(at indices: [Int]) -> [FileEntry] {
+    public func entries(at indices: [Int]) -> [FileEntry] {
         lock.lock()
         defer { lock.unlock() }
         return indices.compactMap { $0 < entries.count ? entries[$0] : nil }
     }
 
-    func entry(at index: Int) -> FileEntry? {
+    public func entry(at index: Int) -> FileEntry? {
         lock.lock()
         defer { lock.unlock() }
         guard index >= 0, index < entries.count else { return nil }
         return entries[index]
     }
 
-    private static func terms(from query: String) -> [String] {
-        query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    public func names(
+        matching query: String,
+        options: SearchOptions = SearchOptions(),
+        sort: SortState = SortState(),
+        previous: (query: String, options: SearchOptions, indices: [Int])? = nil
+    ) -> [String] {
+        entries(at: search(query: query, options: options, sort: sort, previous: previous)).map(\.name)
     }
 
-    private static func canNarrow(from old: String, to new: String) -> Bool {
+    public static func canNarrow(from old: String, to new: String) -> Bool {
         guard new.count >= old.count else { return false }
         return new.hasPrefix(old)
+    }
+
+    public static func terms(from query: String) -> [String] {
+        query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
     }
 
     private static func matches(_ entry: FileEntry, terms: [String], options: SearchOptions) -> Bool {
@@ -222,73 +203,5 @@ final class FileIndex: @unchecked Sendable {
             }
             return sort.ascending ? result == .orderedAscending : result == .orderedDescending
         }
-    }
-}
-
-enum PathDisplay {
-    private static let home = NSHomeDirectory()
-    private static let cloudDocs = NSHomeDirectory() + "/Library/Mobile Documents/com~apple~CloudDocs"
-    private static let cloudStorage = NSHomeDirectory() + "/Library/CloudStorage"
-    private static let mobileDocuments = NSHomeDirectory() + "/Library/Mobile Documents"
-
-    static func pretty(_ directory: String) -> String {
-        if directory.hasPrefix(cloudDocs) {
-            return "iCloud Drive" + directory.dropFirst(cloudDocs.count)
-        }
-        if directory.hasPrefix(cloudStorage) {
-            let rest = String(directory.dropFirst(cloudStorage.count))
-            if rest.isEmpty { return "Cloud Storage" }
-            var parts = rest.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-            if parts.first == "" { parts.removeFirst() }
-            if let first = parts.first {
-                parts[0] = prettyCloudProvider(first)
-            }
-            return parts.joined(separator: "/")
-        }
-        if directory.hasPrefix(mobileDocuments) {
-            return "iCloud" + directory.dropFirst(mobileDocuments.count)
-        }
-        if directory.hasPrefix(home) {
-            return "~" + directory.dropFirst(home.count)
-        }
-        return directory
-    }
-
-    private static func prettyCloudProvider(_ name: String) -> String {
-        if name.hasPrefix("OneDrive-") {
-            return "OneDrive - " + name.dropFirst("OneDrive-".count)
-        }
-        if name.hasPrefix("OneDrive") {
-            return name.replacingOccurrences(of: "-", with: " - ")
-        }
-        return name
-    }
-
-    static func formatSize(_ bytes: Int64?, isDirectory: Bool) -> String {
-        if isDirectory { return "" }
-        guard let bytes else { return "" }
-        if bytes < 1024 { return "\(bytes) B" }
-        let units = ["KB", "MB", "GB", "TB"]
-        var value = Double(bytes)
-        var unitIndex = -1
-        while value >= 1024 && unitIndex < units.count - 1 {
-            value /= 1024
-            unitIndex += 1
-        }
-        if value >= 100 || unitIndex == 0 {
-            return "\(Int(value.rounded())) \(units[unitIndex])"
-        }
-        return String(format: "%.1f %@", value, units[unitIndex])
-    }
-
-    static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/MM/dd HH:mm"
-        return formatter
-    }()
-
-    static func formatDate(_ date: Date?) -> String {
-        guard let date else { return "" }
-        return dateFormatter.string(from: date)
     }
 }

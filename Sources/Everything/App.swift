@@ -1,4 +1,5 @@
 import AppKit
+import EverythingCore
 
 @main
 enum EverythingApp {
