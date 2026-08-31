@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>Everything</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.sailfish.everything</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Everything</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Everything indexes Desktop so you can find files by name.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Everything indexes Documents so you can find files by name.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Everything indexes Downloads so you can find files by name.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Everything can index files on volumes you choose.</string>
+</dict>
+</plist>
