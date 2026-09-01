@@ -266,6 +266,7 @@ enum QueryTests {
         ])
         try expectEqual(index.names(matching: "empty:"), ["zero.dat"])
         try expectEqual(sampleIndex().names(matching: "regex:photo\\.jpg"), ["photo.jpg"])
+        try expectEqual(Set(sampleIndex().names(matching: "regex:jpg|mp3")), Set(["photo.jpg", "song.mp3"]))
         try expect(sampleIndex().names(matching: "regex:(").isEmpty)
         try expect(sampleIndex().names(matching: "会议 regex:docx$").contains("会议纪要.docx"))
     }

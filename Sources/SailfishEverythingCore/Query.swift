@@ -54,6 +54,7 @@ indirect enum PackedAtom: Equatable {
     case modified(DateCompare)
     case created(DateCompare)
     case emptyFile
+    case regexPattern(String)
     case not(PackedAtom)
 
     init?(term: QueryTerm) {
@@ -89,8 +90,11 @@ indirect enum PackedAtom: Equatable {
         case .path(let text) where !text.isEmpty:
             self = .pathGlob(text)
         case .regex(let pattern) where !pattern.isEmpty:
-            guard let atom = PackedAtom.fromRegex(pattern) else { return nil }
-            self = atom
+            if let atom = PackedAtom.fromRegex(pattern) {
+                self = atom
+            } else {
+                self = .regexPattern(pattern)
+            }
         case .fileOnly:
             self = .files
         case .folderOnly:
@@ -160,6 +164,55 @@ indirect enum PackedAtom: Equatable {
         if anchoredStart { return .prefix(text) }
         if anchoredEnd { return .suffix(text) }
         return .contains(text)
+    }
+
+    static func regexLiteralHint(_ pattern: String) -> String? {
+        let bytes = Array(pattern.utf8)
+        var i = 0
+        var current: [UInt8] = []
+        var best: [UInt8] = []
+        var sawChoice = false
+        if i < bytes.count, bytes[i] == 0x5E { i += 1 }
+        while i < bytes.count {
+            let byte = bytes[i]
+            if byte == 0x24, i == bytes.count - 1 { break }
+            if byte == 0x5C, i + 1 < bytes.count {
+                let next = bytes[i + 1]
+                if isEscapedLiteral(next) {
+                    current.append(next)
+                } else {
+                    if current.count > best.count { best = current }
+                    current = []
+                }
+                i += 2
+                continue
+            }
+            if byte == 0x7C || byte == 0x28 {
+                sawChoice = true
+                break
+            }
+            if isRegexMeta(byte) {
+                if current.count > best.count { best = current }
+                current = []
+                i += 1
+                continue
+            }
+            current.append(byte)
+            i += 1
+        }
+        if !sawChoice, current.count > best.count { best = current }
+        if sawChoice { return nil }
+        guard best.count >= 2 else { return nil }
+        return String(decoding: best, as: UTF8.self)
+    }
+
+    private static func isEscapedLiteral(_ byte: UInt8) -> Bool {
+        switch byte {
+        case 0x2E, 0x5E, 0x24, 0x2A, 0x2B, 0x3F, 0x28, 0x29, 0x5B, 0x5D, 0x7B, 0x7D, 0x7C, 0x5C:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func isRegexMeta(_ byte: UInt8) -> Bool {

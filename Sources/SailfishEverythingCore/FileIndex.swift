@@ -454,7 +454,11 @@ public final class FileIndex: @unchecked Sendable {
             } else if !options.matchWholeWord, let atom = PackedAtom.fromRegex(trimmed) {
                 hits = hay.hits(atom: atom, candidates: seed, matchCase: options.matchCase)
             } else if let regex = Query.makeRegex(trimmed, matchCase: options.matchCase) {
-                hits = hay.scanRegex(regex, candidates: seed)
+                var pool = seed
+                if let hint = PackedAtom.regexLiteralHint(trimmed), hint.count >= 2 {
+                    pool = hay.hits(atom: .contains(hint), candidates: seed, matchCase: options.matchCase)
+                }
+                hits = hay.scanRegex(regex, candidates: pool)
             } else {
                 return []
             }
@@ -1353,6 +1357,8 @@ public final class FileIndex: @unchecked Sendable {
             return 350 + text.count
         case .nameLength:
             return 200
+        case .regexPattern:
+            return 50
         case .fileSize, .modified, .created, .emptyFile:
             return -1
         case .files, .folders, .not:

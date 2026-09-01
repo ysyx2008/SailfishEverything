@@ -13,6 +13,9 @@ swift build --product SailfishEverything
 echo "==> unit / smoke / regression / e2e"
 swift run SailfishEverythingTests
 
+echo "==> release speed"
+SAILFISH_BENCH=1 swift run -c release SailfishEverythingTests
+
 echo "==> release build and package"
 APP="$(./scripts/package.sh)"
 test -x "$APP/Contents/MacOS/SailfishEverything"

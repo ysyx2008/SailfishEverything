@@ -20,6 +20,8 @@ enum ScannerSmokeTests {
         TestCase(name: "冒烟.很多文件夹一起扫也要快", run: scanWideTree),
         TestCase(name: "冒烟.扫盘中途也能搜", run: searchDuringBulkLoad),
         TestCase(name: "冒烟.按路径搜大批量也要快", run: matchPathLargeIndex),
+        TestCase(name: "冒烟.三十万条按路径首字也要快", run: matchPath300k),
+        TestCase(name: "冒烟.大批量两个词或者也要快", run: orTwoWordsLargeIndex),
         TestCase(name: "冒烟.开头结尾精确大批量也要快", run: affixLargeIndex),
         TestCase(name: "冒烟.扩展名和只要文件也要快", run: extAndFileLargeIndex),
         TestCase(name: "冒烟.限定文件夹和通配符也要快", run: folderAndWildcardLargeIndex),
@@ -204,9 +206,9 @@ enum ScannerSmokeTests {
         index.add(batch)
 
         let first = DispatchTime.now()
-        let one = index.names(matching: "会")
+        let one = index.search(query: "会")
         let firstMs = Double(DispatchTime.now().uptimeNanoseconds - first.uptimeNanoseconds) / 1_000_000
-        try expectEqual(one, ["会议纪要.docx"])
+        try expectEqual(index.entries(at: one).map(\.name), ["会议纪要.docx"])
         bench("CJK first keystroke", firstMs)
         try expect(firstMs < 20, "first CJK keystroke took \(firstMs)ms")
 
@@ -367,11 +369,52 @@ enum ScannerSmokeTests {
         var options = SearchOptions()
         options.matchPath = true
         let started = DispatchTime.now()
-        let names = index.names(matching: "Q3会议", options: options)
+        let hits = index.search(query: "Q3会议", options: options)
         let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
-        try expectEqual(names, ["photo.jpg"])
+        try expectEqual(index.entries(at: hits).map(\.name), ["photo.jpg"])
         try expect(elapsedMs < 20, "path search took \(elapsedMs)ms")
         try expect(index.names(matching: "Q3会议").isEmpty)
+    }
+
+    private static func matchPath300k() throws {
+        let index = FileIndex()
+        var batch: [FileEntry] = []
+        batch.reserveCapacity(300_001)
+        for i in 0..<300_000 {
+            batch.append(FileEntry(name: String(format: "item-%06d.txt", i), directory: "/pool"))
+        }
+        batch.append(FileEntry(name: "photo.jpg", directory: "/Desktop/会议纪要箱"))
+        index.add(batch)
+
+        var options = SearchOptions()
+        options.matchPath = true
+        let started = DispatchTime.now()
+        let hits = index.search(query: "会议纪要箱", options: options)
+        let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
+        try expectEqual(index.entries(at: hits).map(\.name), ["photo.jpg"])
+        bench("match path 300k", elapsedMs)
+        try expect(elapsedMs < 20, "match path 300k took \(elapsedMs)ms")
+        try expect(index.search(query: "会议纪要箱").isEmpty)
+    }
+
+    private static func orTwoWordsLargeIndex() throws {
+        let index = FileIndex()
+        var batch: [FileEntry] = []
+        batch.reserveCapacity(80_002)
+        for i in 0..<80_000 {
+            batch.append(FileEntry(name: String(format: "item-%05d.txt", i), directory: "/pool"))
+        }
+        batch.append(FileEntry(name: "会议纪要.docx", directory: "/Desktop"))
+        batch.append(FileEntry(name: "notes.txt", directory: "/Desktop"))
+        index.add(batch)
+
+        let started = DispatchTime.now()
+        let hits = index.search(query: "item | 会议")
+        let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
+        try expect(hits.count >= 80_001, "OR hit \(hits.count)")
+        bench("OR two words 80k", elapsedMs)
+        try expect(elapsedMs < 30, "OR search took \(elapsedMs)ms")
+        try expectEqual(index.search(query: "notes | 会议").count, 2)
     }
 
     private static func affixLargeIndex() throws {
@@ -501,6 +544,17 @@ enum ScannerSmokeTests {
             Set(["会议纪要.docx", "会议安排.pdf"])
         )
 
+        let complexStart = DispatchTime.now()
+        let digits = index.search(query: "regex:item-\\d{5}")
+        let complexMs = Double(DispatchTime.now().uptimeNanoseconds - complexStart.uptimeNanoseconds) / 1_000_000
+        try expect(digits.count >= 80_000, "digit regex hit \(digits.count)")
+        bench("complex regex 80k", complexMs)
+        try expect(complexMs < 80, "complex regex took \(complexMs)ms")
+        try expectEqual(
+            Set(index.search(query: "regex:会议.+").compactMap { index.entry(at: $0)?.name }),
+            Set(["会议纪要.docx", "会议安排.pdf"])
+        )
+
         let notStart = DispatchTime.now()
         let remaining = Set(index.names(matching: "会议 !pdf"))
         let notMs = Double(DispatchTime.now().uptimeNanoseconds - notStart.uptimeNanoseconds) / 1_000_000
@@ -577,9 +631,9 @@ enum ScannerSmokeTests {
 
         FileMetadata.reset()
         let started = DispatchTime.now()
-        let names = index.names(matching: "会议 size:>1kb")
+        let hits = index.search(query: "会议 size:>1kb")
         let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
-        try expectEqual(names, ["会议纪要.docx"])
+        try expectEqual(index.entries(at: hits).map(\.name), ["会议纪要.docx"])
         try expectEqual(FileMetadata.cachedCount, 0)
         bench("text then size 80k", elapsedMs)
         try expect(elapsedMs < 15, "text+size search took \(elapsedMs)ms")

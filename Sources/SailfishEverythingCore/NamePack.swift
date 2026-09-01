@@ -237,6 +237,13 @@ struct NamePack: Sendable {
         switch atom {
         case .files, .folders, .anySuffix, .not, .fileSize, .modified, .created, .emptyFile:
             return candidates ?? []
+        case .regexPattern(let pattern):
+            guard let regex = Query.makeRegex(pattern, matchCase: matchCase) else { return [] }
+            var pool = candidates
+            if let hint = PackedAtom.regexLiteralHint(pattern), hint.count >= 2 {
+                pool = hits(atom: .contains(hint), candidates: candidates, matchCase: matchCase)
+            }
+            return scanRegex(regex, candidates: pool)
         case .parentContains(let text):
             return parentContains(text, candidates: candidates, wholeWord: wholeWord, matchCase: matchCase)
         case .parentGlob(let pattern):
@@ -495,6 +502,32 @@ struct NamePack: Sendable {
 
     func scanRegex(_ regex: NSRegularExpression, candidates: [Int]?) -> [Int] {
         let pool = candidates ?? Array(0..<count)
+        guard !pool.isEmpty else { return [] }
+        if pool.count < 4_096 {
+            return scanRegexSerial(regex, pool: pool)
+        }
+        let workers = min(8, max(2, ProcessInfo.processInfo.activeProcessorCount))
+        let chunk = (pool.count + workers - 1) / workers
+        let gather = NSLock()
+        var parts = Array(repeating: [Int](), count: workers)
+        DispatchQueue.concurrentPerform(iterations: workers) { worker in
+            let start = worker * chunk
+            let end = min(pool.count, start + chunk)
+            guard start < end else { return }
+            let part = scanRegexSerial(regex, pool: Array(pool[start..<end]))
+            gather.lock()
+            parts[worker] = part
+            gather.unlock()
+        }
+        var hits: [Int] = []
+        hits.reserveCapacity(parts.reduce(0) { $0 + $1.count })
+        for part in parts {
+            hits.append(contentsOf: part)
+        }
+        return hits
+    }
+
+    private func scanRegexSerial(_ regex: NSRegularExpression, pool: [Int]) -> [Int] {
         var hits: [Int] = []
         hits.reserveCapacity(min(pool.count, 64))
         for index in pool {
