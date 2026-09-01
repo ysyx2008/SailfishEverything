@@ -1,0 +1,72 @@
+---
+description: Git 提交规范：只在用户要求时提交，只纳入当前任务相关文件，写清为什么
+alwaysApply: true
+---
+
+# Git 提交规范
+
+只在用户明确要求提交时才 `git add` / `git commit`。没要求就不要主动提交。
+
+## 提交前
+
+并行看这三样，再决定纳入哪些文件、怎么写说明：
+
+- `git status`
+- `git diff` 与 `git diff --cached`
+- `git log`（跟本仓库已有说明的语气对齐）
+
+**只提交与当前对话/任务直接相关的修改。** 工作区里其他无关改动、未完成的重构、调试代码、顺手改的格式，一律不 stage。若有未纳入的改动，提交后简短提醒用户。
+
+不要用 `git add -A` 或 `git add .` 一把梭。逐个 `git add <path>`。
+
+## 提交说明
+
+遵循 Conventional Commits：
+
+```
+<type>(<scope>): <subject>
+
+<body>
+```
+
+| type | 说明 |
+|---|---|
+| feat | 新功能 |
+| fix | 修复 bug |
+| docs | 文档 / 规范 / SPEC |
+| style | 代码格式（不影响功能） |
+| refactor | 重构（非 feat、非 fix） |
+| perf | 性能优化 |
+| test | 测试相关 |
+| chore | 构建 / 工具 / 依赖 |
+| ci | CI/CD |
+| revert | 回退 |
+
+- subject 写**为什么**，不超过约 50 字，祈使语气，末尾不加句号
+- 改动涉及多件不相关的事，拆成多次提交
+- 用 HEREDOC 传说明，避免转义问题：
+
+```bash
+git commit -m "$(cat <<'EOF'
+docs: 引入 spec 驱动协作规范
+
+EOF
+)"
+```
+
+## 安全
+
+- 不要改 git config
+- 不要跳过 hook（`--no-verify` / `--no-gpg-sign`）
+- 不要 `git add -i` / `git rebase -i` 等需要交互的命令
+- 不要 force push 到 `main` / `master`
+- 不要 `reset --hard`、`push --force` 等破坏性操作，除非用户明确要求
+- **默认不要 amend**。只有同时满足才可以：用户明确要求 amend，或刚由你提交成功但 hook 改了还需纳入的文件；HEAD 是你刚提交的；且还没推到远端
+- hook 失败后不要 amend 硬塞，修完再开一条新提交
+- 已经推到远端就不要 amend，除非用户明确要求（这通常需要 force push）
+- **不要 push**，除非用户明确要求
+
+## 禁止
+
+- 把密钥、`.env`、凭据文件提交进去
+- 空提交（没有任何改动时不要 `git commit`）
