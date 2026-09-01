@@ -471,14 +471,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     @objc func openSelected(_ sender: Any?) {
         for entry in selectedEntries() {
-            NSWorkspace.shared.open(URL(fileURLWithPath: entry.path, isDirectory: entry.isDirectory))
+            if entry.isDirectory {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: entry.path)
+            } else {
+                NSWorkspace.shared.open(URL(fileURLWithPath: entry.path, isDirectory: false))
+            }
         }
     }
 
     @objc func openPath(_ sender: Any?) {
-        let urls = selectedEntries().map { URL(fileURLWithPath: $0.path) }
-        guard !urls.isEmpty else { return }
-        NSWorkspace.shared.activateFileViewerSelecting(urls)
+        for entry in selectedEntries() {
+            NSWorkspace.shared.selectFile(entry.path, inFileViewerRootedAtPath: entry.directory)
+        }
     }
 
     @objc func copyFullPath(_ sender: Any?) {
