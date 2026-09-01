@@ -6,6 +6,8 @@ enum IndexRegressionTests {
         TestCase(name: "回归.边敲边出不必回车", run: noEnterRequired),
         TestCase(name: "回归.只认文件名不认正文", run: filenameOnlyNotContent),
         TestCase(name: "回归.排序", run: sorts),
+        TestCase(name: "回归.按名称再按路径", run: nameThenPath),
+        TestCase(name: "回归.打开过的排前面", run: openedFirst),
         TestCase(name: "回归.重建名单", run: resetClears),
         TestCase(name: "回归.源码不接Spotlight", run: sourcesDoNotUseSpotlight),
     ]}
@@ -55,6 +57,54 @@ enum IndexRegressionTests {
         try expectEqual(index.names(matching: "", sort: SortState(column: .size, ascending: false)), ["a.txt", "b.txt"])
         try expectEqual(index.names(matching: "", sort: SortState(column: .modified, ascending: false)), ["a.txt", "b.txt"])
         try expectEqual(index.names(matching: "", sort: SortState(column: .path, ascending: true)), ["a.txt", "b.txt"])
+    }
+
+    private static func nameThenPath() throws {
+        let index = FileIndex()
+        index.add([
+            FileEntry(name: "report.pdf", directory: "/z"),
+            FileEntry(name: "my-report.txt", directory: "/a"),
+            FileEntry(name: "report-final.docx", directory: "/m"),
+        ])
+        try expectEqual(
+            index.names(matching: "report"),
+            ["my-report.txt", "report-final.docx", "report.pdf"]
+        )
+        try expectEqual(
+            index.names(matching: "report", sort: SortState(column: .path, ascending: true)),
+            ["my-report.txt", "report-final.docx", "report.pdf"]
+        )
+        let sameName = FileIndex()
+        sameName.add([
+            FileEntry(name: "notes.txt", directory: "/z"),
+            FileEntry(name: "notes.txt", directory: "/a"),
+        ])
+        try expectEqual(
+            sameName.search(query: "notes").map { sameName.entries(at: [$0])[0].directory },
+            ["/a", "/z"]
+        )
+    }
+
+    private static func openedFirst() throws {
+        let index = FileIndex()
+        index.add([
+            FileEntry(name: "aaa.txt", directory: "/a"),
+            FileEntry(name: "zzz.txt", directory: "/a"),
+            FileEntry(name: "mmm.txt", directory: "/a"),
+        ])
+        try expectEqual(index.names(matching: "txt"), ["aaa.txt", "mmm.txt", "zzz.txt"])
+        try expectEqual(
+            index.names(matching: "txt", openedPaths: ["/a/zzz.txt"]),
+            ["zzz.txt", "aaa.txt", "mmm.txt"]
+        )
+        try expectEqual(
+            index.names(matching: "txt", openedPaths: ["/a/mmm.txt", "/a/zzz.txt"]),
+            ["mmm.txt", "zzz.txt", "aaa.txt"]
+        )
+        try expectEqual(
+            index.names(matching: "txt", openedPaths: ["/no/such.txt", "/a/aaa.txt"]),
+            ["aaa.txt", "mmm.txt", "zzz.txt"]
+        )
     }
 
     private static func resetClears() throws {

@@ -6,13 +6,15 @@ public struct IndexSettings: Codable, Equatable, Sendable {
     public var disabledDefaultPrefixes: [String]
     public var disabledDefaultNames: [String]
     public var extraRoots: [String]
+    public var preferOpened: Bool
 
     public static let `default` = IndexSettings(
         skipHiddenFolders: true,
         extraExcludedRelatives: [],
         disabledDefaultPrefixes: [],
         disabledDefaultNames: [],
-        extraRoots: []
+        extraRoots: [],
+        preferOpened: true
     )
 
     public init(
@@ -20,17 +22,19 @@ public struct IndexSettings: Codable, Equatable, Sendable {
         extraExcludedRelatives: [String] = [],
         disabledDefaultPrefixes: [String] = [],
         disabledDefaultNames: [String] = [],
-        extraRoots: [String] = []
+        extraRoots: [String] = [],
+        preferOpened: Bool = true
     ) {
         self.skipHiddenFolders = skipHiddenFolders
         self.extraExcludedRelatives = extraExcludedRelatives
         self.disabledDefaultPrefixes = disabledDefaultPrefixes
         self.disabledDefaultNames = disabledDefaultNames
         self.extraRoots = extraRoots
+        self.preferOpened = preferOpened
     }
 
     enum CodingKeys: String, CodingKey {
-        case skipHiddenFolders, extraExcludedRelatives, disabledDefaultPrefixes, disabledDefaultNames, extraRoots
+        case skipHiddenFolders, extraExcludedRelatives, disabledDefaultPrefixes, disabledDefaultNames, extraRoots, preferOpened
     }
 
     public init(from decoder: Decoder) throws {
@@ -40,6 +44,7 @@ public struct IndexSettings: Codable, Equatable, Sendable {
         disabledDefaultPrefixes = try container.decodeIfPresent([String].self, forKey: .disabledDefaultPrefixes) ?? []
         disabledDefaultNames = try container.decodeIfPresent([String].self, forKey: .disabledDefaultNames) ?? []
         extraRoots = try container.decodeIfPresent([String].self, forKey: .extraRoots) ?? []
+        preferOpened = try container.decodeIfPresent(Bool.self, forKey: .preferOpened) ?? true
     }
 
     public func extraRootURLs(home: URL, fileManager: FileManager = .default) -> [URL] {

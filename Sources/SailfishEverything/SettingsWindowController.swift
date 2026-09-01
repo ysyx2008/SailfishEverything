@@ -12,6 +12,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     private var excludeTable: NSTableView!
     private var extraTable: NSTableView!
     private var skipHiddenCheckbox: NSButton!
+    private var preferOpenedCheckbox: NSButton!
     private var launchAtLoginCheckbox: NSButton!
     private var hotKeyPopup: NSPopUpButton!
 
@@ -53,6 +54,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         skipHiddenCheckbox.translatesAutoresizingMaskIntoConstraints = false
         skipHiddenCheckbox.state = settings.skipHiddenFolders ? .on : .off
         content.addSubview(skipHiddenCheckbox)
+
+        preferOpenedCheckbox = NSButton(checkboxWithTitle: L10n.t(.preferOpened), target: self, action: #selector(togglePreferOpened))
+        preferOpenedCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        preferOpenedCheckbox.state = settings.preferOpened ? .on : .off
+        content.addSubview(preferOpenedCheckbox)
 
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: L10n.t(.launchAtLogin), target: nil, action: nil)
         launchAtLoginCheckbox.translatesAutoresizingMaskIntoConstraints = false
@@ -149,7 +155,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             skipHiddenCheckbox.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             skipHiddenCheckbox.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
 
-            launchAtLoginCheckbox.topAnchor.constraint(equalTo: skipHiddenCheckbox.bottomAnchor, constant: 8),
+            preferOpenedCheckbox.topAnchor.constraint(equalTo: skipHiddenCheckbox.bottomAnchor, constant: 8),
+            preferOpenedCheckbox.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            preferOpenedCheckbox.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+
+            launchAtLoginCheckbox.topAnchor.constraint(equalTo: preferOpenedCheckbox.bottomAnchor, constant: 8),
             launchAtLoginCheckbox.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             launchAtLoginCheckbox.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
 
@@ -231,6 +241,10 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     @objc private func toggleHidden() {
         settings.skipHiddenFolders = skipHiddenCheckbox.state == .on
+    }
+
+    @objc private func togglePreferOpened() {
+        settings.preferOpened = preferOpenedCheckbox.state == .on
     }
 
     @objc private func changeHotKey() {
@@ -321,6 +335,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         settings = .default
         settings.extraRoots = extras
         skipHiddenCheckbox.state = .on
+        preferOpenedCheckbox.state = .on
         reloadLists()
     }
 

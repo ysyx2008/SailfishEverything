@@ -175,6 +175,7 @@ public enum L10n {
         case syntaxBody
         case settingsTitle
         case skipHidden
+        case preferOpened
         case launchAtLogin
         case openFullDiskAccess
         case diskAccessOK
@@ -316,6 +317,7 @@ public enum L10n {
             """,
             .settingsTitle: "Settings",
             .skipHidden: "Skip hidden folders (.cache, .npm, …)",
+            .preferOpened: "Show opened files first",
             .launchAtLogin: "Open \(L10n.productNameEnglish) at login",
             .openFullDiskAccess: "Open Full Disk Access…",
             .diskAccessOK: "Protected folders are readable.",
@@ -455,6 +457,7 @@ public enum L10n {
             """,
             .settingsTitle: "设置",
             .skipHidden: "跳过隐藏文件夹（.cache、.npm 等）",
+            .preferOpened: "打开过的排前面",
             .launchAtLogin: "登录时打开\(L10n.productNameChinese)",
             .openFullDiskAccess: "打开「完全磁盘访问」…",
             .diskAccessOK: "已能读取受保护的文件夹。",

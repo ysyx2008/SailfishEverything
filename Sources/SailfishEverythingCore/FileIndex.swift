@@ -367,8 +367,12 @@ public final class FileIndex: @unchecked Sendable {
         sort: SortState = SortState(),
         previous: SearchCursor? = nil,
         allowFullSort: Bool = true,
+        openedPaths: [String] = [],
         shouldContinue: () -> Bool = { true }
     ) -> [Int] {
+        func done(_ hits: [Int]) -> [Int] {
+            promoteOpened(hits, openedPaths: openedPaths)
+        }
         let parsed = Query.parse(query)
         let queryEmpty = parsed.isEmpty && !options.regex
         let unrestricted = filter == .all && options.inFolder.isEmpty
@@ -395,18 +399,18 @@ public final class FileIndex: @unchecked Sendable {
             if filter != .all {
                 hits = Self.applyFilter(hits, filter: filter, pack: pack, dirs: bits)
             }
-            return finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort)
+            return done(finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort))
         }
 
         if queryEmpty && folderFree && filter != .all {
             let all = identitySnap.count == total ? identitySnap : Array(0..<total)
             let hits = Self.applyFilter(all, filter: filter, pack: pack, dirs: bits)
-            return finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort)
+            return done(finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort))
         }
 
         if queryEmpty && unrestricted {
             if let cached, cached.sort == sort, cached.indices.count == total {
-                return cached.indices
+                return done(cached.indices)
             }
             let all = identitySnap.count == total ? identitySnap : Array(0..<total)
             let cheap = total <= Self.fullSortCheapLimit
@@ -426,9 +430,9 @@ public final class FileIndex: @unchecked Sendable {
                     sortedAll = (sort, indices)
                 }
                 lock.unlock()
-                return indices
+                return done(indices)
             }
-            return all
+            return done(all)
         }
 
         if !shouldContinue() { return [] }
@@ -468,7 +472,7 @@ public final class FileIndex: @unchecked Sendable {
             if filter != .all {
                 hits = Self.applyFilter(hits, filter: filter, pack: pack, dirs: bits)
             }
-            return finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort)
+            return done(finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort))
         }
 
         if let groups = parsed.packedAtoms,
@@ -507,7 +511,7 @@ public final class FileIndex: @unchecked Sendable {
             if filter != .all {
                 hits = Self.applyFilter(hits, filter: filter, pack: pack, dirs: bits)
             }
-            return finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort)
+            return done(finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort))
         }
 
         let pool: [Int]
@@ -543,8 +547,41 @@ public final class FileIndex: @unchecked Sendable {
             filter: filter,
             shouldContinue: shouldContinue
         )
-        if alreadySorted { return hits }
-        return finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort)
+        if alreadySorted { return done(hits) }
+        return done(finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort))
+    }
+
+    private func promoteOpened(_ hits: [Int], openedPaths: [String]) -> [Int] {
+        guard !openedPaths.isEmpty, !hits.isEmpty else { return hits }
+        lock.lock()
+        var resolved: [Int] = []
+        resolved.reserveCapacity(min(openedPaths.count, 64))
+        for path in openedPaths {
+            if let index = pathIndex[path] {
+                resolved.append(index)
+            }
+        }
+        lock.unlock()
+        guard !resolved.isEmpty else { return hits }
+        let wanted = Set(resolved)
+        var present = Set<Int>()
+        if resolved.count <= 64 {
+            for index in hits where wanted.contains(index) {
+                present.insert(index)
+            }
+        } else {
+            present = Set(hits).intersection(wanted)
+        }
+        guard !present.isEmpty else { return hits }
+        let front = resolved.filter { present.contains($0) }
+        let drop = Set(front)
+        var out: [Int] = []
+        out.reserveCapacity(hits.count)
+        out.append(contentsOf: front)
+        for index in hits where !drop.contains(index) {
+            out.append(index)
+        }
+        return out
     }
 
     private func finishPackedHits(
@@ -666,9 +703,17 @@ public final class FileIndex: @unchecked Sendable {
         options: SearchOptions = SearchOptions(),
         filter: ResultFilter = .all,
         sort: SortState = SortState(),
-        previous: SearchCursor? = nil
+        previous: SearchCursor? = nil,
+        openedPaths: [String] = []
     ) -> [String] {
-        entries(at: search(query: query, options: options, filter: filter, sort: sort, previous: previous)).map(\.name)
+        entries(at: search(
+            query: query,
+            options: options,
+            filter: filter,
+            sort: sort,
+            previous: previous,
+            openedPaths: openedPaths
+        )).map(\.name)
     }
 
     public static let fullSortCheapLimit = 4_096

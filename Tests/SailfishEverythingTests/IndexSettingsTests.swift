@@ -12,6 +12,7 @@ enum IndexSettingsTests {
         TestCase(name: "单元.家目录里的额外根不会扫两遍", run: extraRootInsideHomeIgnored),
         TestCase(name: "单元.不存在的额外根不影响家目录", run: missingExtraRootOk),
         TestCase(name: "单元.旧设置没有额外根也能读", run: decodeLegacySettings),
+        TestCase(name: "单元.打开记录记住最近的", run: runHistoryRemembers),
         TestCase(name: "单元.中文默认快捷键避开输入法", run: chineseHotKeyDefault),
         TestCase(name: "单元.去掉云盘排除后能搜到", run: includeCloudWhenUnexcluded),
     ]}
@@ -61,6 +62,7 @@ enum IndexSettingsTests {
         var settings = IndexSettings(skipHiddenFolders: false, extraExcludedRelatives: ["foo"])
         settings = .default
         try expect(settings.skipHiddenFolders)
+        try expect(settings.preferOpened)
         try expect(settings.extraExcludedRelatives.isEmpty)
         try expect(settings.displayExcludes().contains("Library/Caches"))
         try expect(settings.displayExcludes().contains("node_modules"))
@@ -111,6 +113,7 @@ enum IndexSettingsTests {
         try expect(!settings.skipHiddenFolders)
         try expectEqual(settings.extraExcludedRelatives, ["foo"])
         try expect(settings.extraRoots.isEmpty)
+        try expect(settings.preferOpened)
         try expectEqual(IndexSettings.resolvedLookIn("/Volumes/USB", home: URL(fileURLWithPath: "/Users/me")), "/Volumes/USB")
         try expectEqual(IndexSettings.resolvedLookIn("", home: URL(fileURLWithPath: "/Users/me")), "")
     }
@@ -137,5 +140,17 @@ enum IndexSettingsTests {
         try expectEqual(AppHotKeyStore.load(defaults: defaults, language: .chinese), .optionSpace)
         AppHotKeyStore.save(.commandShiftSpace, defaults: defaults)
         try expectEqual(AppHotKeyStore.load(defaults: defaults, language: .chinese), .commandShiftSpace)
+    }
+
+    private static func runHistoryRemembers() throws {
+        let suite = "sailfish.run.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try expect(RunHistoryStore.load(defaults: defaults).isEmpty)
+        RunHistoryStore.record("/a/zzz.txt", defaults: defaults)
+        RunHistoryStore.record("/a/aaa.txt", defaults: defaults)
+        try expectEqual(RunHistoryStore.load(defaults: defaults), ["/a/aaa.txt", "/a/zzz.txt"])
+        RunHistoryStore.record("/a/zzz.txt", defaults: defaults)
+        try expectEqual(RunHistoryStore.load(defaults: defaults), ["/a/zzz.txt", "/a/aaa.txt"])
     }
 }

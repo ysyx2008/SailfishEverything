@@ -67,6 +67,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private var scanner: FileScanner!
     private var settingsWindow: SettingsWindowController?
     private var history: [String] = []
+    private var openedPaths: [String] = []
 
     private var searchField: SearchField!
     private var tableView: ResultsTableView!
@@ -121,6 +122,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         self.settings = AppRuntime.isE2E ? .default : IndexSettingsStore.load()
         self.bookmarks = AppRuntime.isE2E ? [] : BookmarkStore.load()
         self.history = AppRuntime.isE2E ? [] : SearchHistoryStore.load()
+        self.openedPaths = AppRuntime.isE2E ? [] : RunHistoryStore.load()
         window.delegate = self
         folderIcon = NSWorkspace.shared.icon(forFileType: NSFileTypeForHFSTypeCode(OSType(kGenericFolderIcon)))
         folderIcon.size = NSSize(width: 16, height: 16)
@@ -372,6 +374,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
                 return self.searchGeneration == generation
             }
             guard stillCurrent() else { return }
+            let opened = self.settings.preferOpened ? self.openedPaths : []
             let indices = self.index.search(
                 query: query,
                 options: options,
@@ -379,6 +382,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
                 sort: sort,
                 previous: previous,
                 allowFullSort: allowFullSort,
+                openedPaths: opened,
                 shouldContinue: stillCurrent
             )
             DispatchQueue.main.async {
@@ -476,7 +480,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             } else {
                 NSWorkspace.shared.open(URL(fileURLWithPath: entry.path, isDirectory: false))
             }
+            rememberOpened(entry.path)
         }
+        if settings.preferOpened {
+            lastSearch = nil
+            rerunSearch()
+        }
+    }
+
+    private func rememberOpened(_ path: String) {
+        guard !AppRuntime.isE2E else { return }
+        openedPaths = RunHistoryStore.record(path)
     }
 
     @objc func openPath(_ sender: Any?) {
@@ -751,11 +765,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     private func applySettings(_ newSettings: IndexSettings) {
+        let scanChanged = newSettings.skipHiddenFolders != settings.skipHiddenFolders
+            || newSettings.extraExcludedRelatives != settings.extraExcludedRelatives
+            || newSettings.disabledDefaultPrefixes != settings.disabledDefaultPrefixes
+            || newSettings.disabledDefaultNames != settings.disabledDefaultNames
+            || newSettings.extraRoots != settings.extraRoots
         settings = newSettings
         if !AppRuntime.isE2E {
             IndexSettingsStore.save(newSettings)
         }
         settingsWindow = nil
+        if !scanChanged {
+            lastSearch = nil
+            rerunSearch()
+            return
+        }
         isIndexing = true
         indexingPhase = L10n.t(.homeFolder)
         indexedCount = 0
