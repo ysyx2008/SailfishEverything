@@ -1,5 +1,5 @@
 import Foundation
-import EverythingCore
+import SailfishEverythingCore
 
 enum IndexRegressionTests {
     static var cases: [TestCase] {[
@@ -19,7 +19,7 @@ enum IndexRegressionTests {
             FileEntry(name: "预算.xlsx", directory: "/Documents"),
         ])
 
-        var previous: (query: String, options: SearchOptions, indices: [Int])?
+        var previous: SearchCursor?
         var lastCount = Int.max
         for query in ["", "会", "会议", "会议纪"] {
             let indices = index.search(query: query, previous: previous)
@@ -28,7 +28,7 @@ enum IndexRegressionTests {
                 try expect(!indices.isEmpty)
             }
             lastCount = indices.count
-            previous = (query, SearchOptions(), indices)
+            previous = SearchCursor(query: query, indices: indices)
         }
         try expectEqual(lastCount, 2)
     }

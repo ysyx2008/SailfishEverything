@@ -4,33 +4,48 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
+	<key>CFBundleDisplayName</key>
+	<string>Sailfish Everything</string>
 	<key>CFBundleExecutable</key>
-	<string>Everything</string>
+	<string>SailfishEverything</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.sailfish.everything</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Everything</string>
+	<string>Sailfish Everything</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1</string>
+	<string>0.3</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>3</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Sailfish</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>LSUIElement</key>
+	<false/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>Everything indexes Desktop so you can find files by name.</string>
+	<string>Sailfish Everything indexes Desktop so you can find files by name.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>Everything indexes Documents so you can find files by name.</string>
+	<string>Sailfish Everything indexes Documents so you can find files by name.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>Everything indexes Downloads so you can find files by name.</string>
+	<string>Sailfish Everything indexes Downloads so you can find files by name.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
-	<string>Everything can index files on volumes you choose.</string>
+	<string>Sailfish Everything can index files on volumes you choose.</string>
 </dict>
 </plist>

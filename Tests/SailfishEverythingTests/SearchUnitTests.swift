@@ -1,5 +1,5 @@
 import Foundation
-import EverythingCore
+import SailfishEverythingCore
 
 enum SearchUnitTests {
     static var cases: [TestCase] {[
@@ -103,7 +103,7 @@ enum SearchUnitTests {
             ("预算.xlsx", "/a"),
         ])
         let first = index.search(query: "会")
-        let second = index.search(query: "会议", previous: ("会", SearchOptions(), first))
+        let second = index.search(query: "会议", previous: SearchCursor(query: "会", indices: first))
         try expectEqual(first.count, 2)
         try expectEqual(second.count, 1)
         try expect(Set(second).isSubset(of: Set(first)))
@@ -121,7 +121,7 @@ enum SearchUnitTests {
         let withPath = index.names(
             matching: "会议",
             options: SearchOptions(matchPath: true),
-            previous: ("会议", SearchOptions(), previous)
+            previous: SearchCursor(query: "会议", indices: previous)
         )
         try expectEqual(Set(withPath), Set(["notes.txt", "会议.docx"]))
     }

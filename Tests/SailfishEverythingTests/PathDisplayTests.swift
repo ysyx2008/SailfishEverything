@@ -1,5 +1,5 @@
 import Foundation
-import EverythingCore
+import SailfishEverythingCore
 
 enum PathDisplayTests {
     static let home = "/Users/tester"

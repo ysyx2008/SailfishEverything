@@ -5,6 +5,11 @@ public protocol FileScannerDelegate: AnyObject {
     func scanner(_ scanner: FileScanner, didAdd batch: [FileEntry], total: Int)
     func scannerDidFinish(_ scanner: FileScanner, total: Int)
     func scannerDidFail(_ scanner: FileScanner, error: Error)
+    func scanner(_ scanner: FileScanner, didBeginPhase title: String)
+}
+
+public extension FileScannerDelegate {
+    func scanner(_ scanner: FileScanner, didBeginPhase title: String) {}
 }
 
 public final class FileScanner: @unchecked Sendable {
@@ -12,7 +17,8 @@ public final class FileScanner: @unchecked Sendable {
 
     private let index: FileIndex
     private let rootPath: String
-    private let policy: ScanPolicy
+    private var settings: IndexSettings
+    private var policy: ScanPolicy
     private let enableWatch: Bool
     private let notifyOnMain: Bool
     private let queue = DispatchQueue(label: "everything.scanner", qos: .utility)
@@ -20,13 +26,8 @@ public final class FileScanner: @unchecked Sendable {
     private var eventStream: FSEventStreamRef?
 
     private static let resourceKeys: Set<URLResourceKey> = [
-        .isRegularFileKey,
         .isDirectoryKey,
-        .isSymbolicLinkKey,
         .isPackageKey,
-        .fileSizeKey,
-        .totalFileAllocatedSizeKey,
-        .contentModificationDateKey,
         .isUbiquitousItemKey,
         .ubiquitousItemDownloadingStatusKey,
         .nameKey,
@@ -35,13 +36,15 @@ public final class FileScanner: @unchecked Sendable {
     public init(
         index: FileIndex,
         root: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
-        policy: ScanPolicy = .default,
+        settings: IndexSettings = .default,
+        policy: ScanPolicy? = nil,
         enableWatch: Bool = true,
         notifyOnMain: Bool = true
     ) {
         self.index = index
         self.rootPath = root.resolvingSymlinksInPath().path
-        self.policy = policy
+        self.settings = settings
+        self.policy = policy ?? ScanPolicy.from(settings)
         self.enableWatch = enableWatch
         self.notifyOnMain = notifyOnMain
     }
@@ -68,49 +71,113 @@ public final class FileScanner: @unchecked Sendable {
         }
     }
 
+    public func apply(_ settings: IndexSettings) {
+        stopFlag = true
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.stopEvents()
+            self.settings = settings
+            self.policy = ScanPolicy.from(settings)
+            self.index.reset()
+            self.stopFlag = false
+            self.scan()
+        }
+    }
+
     public func scanSynchronously() {
         stopFlag = false
         scan()
     }
 
     private func scan() {
-        let root = URL(fileURLWithPath: rootPath, isDirectory: true)
-        guard let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: Array(Self.resourceKeys),
-            options: [.skipsPackageDescendants],
-            errorHandler: { _, _ in true }
-        ) else {
+        let home = URL(fileURLWithPath: rootPath, isDirectory: true)
+        var homeIsDir: ObjCBool = false
+        if !FileManager.default.fileExists(atPath: rootPath, isDirectory: &homeIsDir) || !homeIsDir.boolValue {
             notify { delegate in
                 delegate.scannerDidFail(self, error: NSError(
-                    domain: "Everything",
-                    code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Could not start scan"]
+                    domain: "SailfishEverything",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: L10n.t(.homeMissing)]
                 ))
             }
             return
         }
+        policy = ScanPolicy.from(settings)
+        index.beginBulkLoad()
 
-        var batch: [FileEntry] = []
-        batch.reserveCapacity(2_000)
-        var lastFlush = Date()
+        notify { delegate in
+            delegate.scanner(self, didBeginPhase: L10n.t(.homeFolder))
+        }
+        walkPublishing(rootPath)
 
-        func flush(force: Bool) {
-            guard !batch.isEmpty else { return }
-            if !force, Date().timeIntervalSince(lastFlush) < 0.2, batch.count < 2_000 {
-                return
-            }
-            let outgoing = batch
-            batch.removeAll(keepingCapacity: true)
-            lastFlush = Date()
-            let total = index.add(outgoing)
+        for extra in settings.extraRootURLs(home: home) {
+            if stopFlag { break }
             notify { delegate in
-                delegate.scanner(self, didAdd: outgoing, total: total)
+                delegate.scanner(self, didBeginPhase: extra.lastPathComponent)
             }
+            walkPublishing(extra.path)
+        }
+
+        index.endBulkLoad()
+        let total = index.count
+        notify { delegate in
+            delegate.scannerDidFinish(self, total: total)
+        }
+
+        if !stopFlag {
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                self?.index.warmCaches()
+            }
+        }
+        if !stopFlag, enableWatch {
+            startEvents()
+        }
+    }
+
+    private func publish(_ batch: [FileEntry], notifyEntries: Bool) {
+        guard !batch.isEmpty else { return }
+        let total = index.add(batch)
+        notify { delegate in
+            delegate.scanner(self, didAdd: notifyEntries ? batch : [], total: total)
+        }
+    }
+
+    private func walkPublishing(_ root: String) {
+        FastWalk.walk(
+            root: root,
+            rootPath: rootPath,
+            policy: policy,
+            stop: { self.stopFlag }
+        ) { batch in
+            self.publish(batch, notifyEntries: false)
+        }
+    }
+
+    private func scanTree(_ root: URL, reportFailure: Bool = true, append: (FileEntry) -> Void) {
+        var options: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
+        if policy.skipHiddenFolders {
+            options.insert(.skipsHiddenFiles)
+        }
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: Array(Self.resourceKeys),
+            options: options,
+            errorHandler: { _, _ in true }
+        ) else {
+            if reportFailure {
+                notify { delegate in
+                    delegate.scannerDidFail(self, error: NSError(
+                        domain: "SailfishEverything",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: L10n.t(.scanFailed)]
+                    ))
+                }
+            }
+            return
         }
 
         if let rootEntry = makeEntry(for: root, keys: Self.resourceKeys) {
-            batch.append(rootEntry)
+            append(rootEntry)
         }
 
         while let item = enumerator.nextObject() as? URL {
@@ -133,24 +200,16 @@ public final class FileScanner: @unchecked Sendable {
             }
 
             if let entry = makeEntry(for: item, values: values) {
-                batch.append(entry)
-                flush(force: false)
+                append(entry)
             }
-        }
-
-        flush(force: true)
-
-        let total = index.count
-        notify { delegate in
-            delegate.scannerDidFinish(self, total: total)
-        }
-
-        if !stopFlag, enableWatch {
-            startEvents()
         }
     }
 
     public func relativePath(_ path: String) -> String {
+        if path == rootPath { return "" }
+        if path.hasPrefix(rootPath + "/") {
+            return String(path.dropFirst(rootPath.count + 1))
+        }
         let normalized = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         if normalized == rootPath { return "" }
         if normalized.hasPrefix(rootPath + "/") {
@@ -159,47 +218,62 @@ public final class FileScanner: @unchecked Sendable {
         return normalized
     }
 
-    public static func makeEntry(for url: URL, values: URLResourceValues) -> FileEntry? {
+    public static func makeEntry(for url: URL, values: URLResourceValues, rootPath: String? = nil) -> FileEntry? {
         let name = values.name ?? url.lastPathComponent
         guard !name.isEmpty else { return nil }
         let isDirectory = values.isDirectory == true
-        let size = values.fileSize.map { Int64($0) }
-        let allocated = values.totalFileAllocatedSize.map { Int64($0) }
         let isUbiquitous = values.isUbiquitousItem == true
         let downloadStatus = values.ubiquitousItemDownloadingStatus
-        let cloudOnly: Bool = {
-            if isUbiquitous, let downloadStatus, downloadStatus != .current {
-                return true
-            }
-            if let size, let allocated, size > 0, allocated == 0 {
-                return true
-            }
-            return false
-        }()
-
-        let resolved = url.resolvingSymlinksInPath()
-        let path = resolved.path
-        let directory = resolved.deletingLastPathComponent().path
+        let cloudOnly = isUbiquitous && downloadStatus != nil && downloadStatus != .current
+        let (path, directory) = alignedPaths(for: url, rootPath: rootPath)
         return FileEntry(
             name: name,
             nameLower: name.lowercased(),
             directory: directory,
             path: path,
             pathLower: path.lowercased(),
-            size: isDirectory ? nil : size,
-            modified: values.contentModificationDate,
+            size: nil,
+            modified: nil,
+            created: nil,
             isDirectory: isDirectory,
             isCloudOnly: cloudOnly
         )
     }
 
+    private static func alignedPaths(for url: URL, rootPath: String?) -> (String, String) {
+        let raw = url.path
+        if let rootPath, raw == rootPath || raw.hasPrefix(rootPath + "/") {
+            return (raw, url.deletingLastPathComponent().path)
+        }
+        if rootPath != nil {
+            let resolved = url.resolvingSymlinksInPath()
+            return (resolved.path, resolved.deletingLastPathComponent().path)
+        }
+        return (raw, url.deletingLastPathComponent().path)
+    }
+
     private func makeEntry(for url: URL, keys: Set<URLResourceKey>) -> FileEntry? {
         let values = (try? url.resourceValues(forKeys: keys)) ?? URLResourceValues()
-        return Self.makeEntry(for: url, values: values)
+        return Self.makeEntry(for: url, values: values, rootPath: rootPath)
     }
 
     private func makeEntry(for url: URL, values: URLResourceValues) -> FileEntry? {
-        Self.makeEntry(for: url, values: values)
+        Self.makeEntry(for: url, values: values, rootPath: rootPath)
+    }
+
+    private func immediateEntries(in directory: URL) -> [FileEntry] {
+        let items = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(Self.resourceKeys),
+            options: []
+        )) ?? []
+        return items.compactMap { item in
+            let name = item.lastPathComponent
+            let relative = relativePath(item.path)
+            if policy.shouldSkipDescending(relative: relative, name: name) { return nil }
+            if policy.shouldOmitEntry(name: name) { return nil }
+            return makeEntry(for: item, keys: Self.resourceKeys)
+        }
     }
 
     private func notify(_ body: @escaping (FileScannerDelegate) -> Void) {
@@ -220,7 +294,8 @@ public final class FileScanner: @unchecked Sendable {
             release: nil,
             copyDescription: nil
         )
-        let paths = [rootPath] as CFArray
+        let home = URL(fileURLWithPath: rootPath, isDirectory: true)
+        let paths = ([rootPath] + settings.extraRootURLs(home: home).map(\.path)) as CFArray
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
             { _, info, count, pathsPointer, flagsPointer, _ in
@@ -267,9 +342,11 @@ public final class FileScanner: @unchecked Sendable {
         var added: [FileEntry] = []
         var removed: [String] = []
 
-        for path in paths {
+        for raw in paths {
+            let path = URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
             var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir) {
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+                || FileManager.default.fileExists(atPath: raw, isDirectory: &isDir) {
                 let url = URL(fileURLWithPath: path, isDirectory: isDir.boolValue)
                 let relative = relativePath(path)
                 let name = url.lastPathComponent
@@ -279,17 +356,36 @@ public final class FileScanner: @unchecked Sendable {
                 if let entry = makeEntry(for: url, keys: Self.resourceKeys) {
                     added.append(entry)
                 }
+                if isDir.boolValue {
+                    added.append(contentsOf: immediateEntries(in: url))
+                    let parent = url.resolvingSymlinksInPath().path
+                    for known in index.paths(under: parent) where !FileManager.default.fileExists(atPath: known) {
+                        removed.append(known)
+                    }
+                }
             } else {
+                let parent = URL(fileURLWithPath: raw).deletingLastPathComponent().resolvingSymlinksInPath().path
+                let name = URL(fileURLWithPath: raw).lastPathComponent
+                removed.append(raw)
                 removed.append(path)
+                removed.append(contentsOf: index.paths(under: raw))
+                removed.append(contentsOf: index.paths(under: path))
+                removed.append(contentsOf: index.paths(under: parent).filter {
+                    URL(fileURLWithPath: $0).lastPathComponent == name
+                })
             }
         }
 
         if !removed.isEmpty {
+            FileMetadata.invalidate(paths: removed)
             index.remove(paths: removed)
+        }
+        if !added.isEmpty {
+            FileMetadata.invalidate(paths: added.map(\.path))
         }
         let total: Int
         if !added.isEmpty {
-            total = index.add(added)
+            total = index.add(added, replace: true)
         } else {
             total = index.count
         }

@@ -1,0 +1,7 @@
+CFBundleDisplayName = "Sailfish Everything";
+CFBundleName = "Sailfish Everything";
+NSHumanReadableCopyright = "© 2026 Sailfish";
+NSDesktopFolderUsageDescription = "Sailfish Everything indexes Desktop so you can find files by name.";
+NSDocumentsFolderUsageDescription = "Sailfish Everything indexes Documents so you can find files by name.";
+NSDownloadsFolderUsageDescription = "Sailfish Everything indexes Downloads so you can find files by name.";
+NSRemovableVolumesUsageDescription = "Sailfish Everything can index files on volumes you choose.";

@@ -8,6 +8,7 @@ public struct FileEntry: Sendable, Equatable {
     public let pathLower: String
     public let size: Int64?
     public let modified: Date?
+    public let created: Date?
     public let isDirectory: Bool
     public let isCloudOnly: Bool
 
@@ -16,6 +17,7 @@ public struct FileEntry: Sendable, Equatable {
         directory: String,
         size: Int64? = nil,
         modified: Date? = nil,
+        created: Date? = nil,
         isDirectory: Bool = false,
         isCloudOnly: Bool = false
     ) {
@@ -23,12 +25,13 @@ public struct FileEntry: Sendable, Equatable {
             ? directory + name
             : directory + "/" + name
         self.name = name
-        self.nameLower = name.lowercased()
+        self.nameLower = name.fastLowercased()
         self.directory = directory
         self.path = path
-        self.pathLower = path.lowercased()
+        self.pathLower = path.fastLowercased()
         self.size = size
         self.modified = modified
+        self.created = created
         self.isDirectory = isDirectory
         self.isCloudOnly = isCloudOnly
     }
@@ -41,6 +44,7 @@ public struct FileEntry: Sendable, Equatable {
         pathLower: String,
         size: Int64?,
         modified: Date?,
+        created: Date? = nil,
         isDirectory: Bool,
         isCloudOnly: Bool
     ) {
@@ -51,20 +55,40 @@ public struct FileEntry: Sendable, Equatable {
         self.pathLower = pathLower
         self.size = size
         self.modified = modified
+        self.created = created
         self.isDirectory = isDirectory
         self.isCloudOnly = isCloudOnly
     }
 }
 
-public struct SearchOptions: Equatable, Sendable {
+public struct SearchOptions: Equatable, Sendable, Codable {
     public var matchCase: Bool
     public var matchWholeWord: Bool
     public var matchPath: Bool
+    public var regex: Bool
+    public var inFolder: String
 
-    public init(matchCase: Bool = false, matchWholeWord: Bool = false, matchPath: Bool = false) {
+    public init(
+        matchCase: Bool = false,
+        matchWholeWord: Bool = false,
+        matchPath: Bool = false,
+        regex: Bool = false,
+        inFolder: String = ""
+    ) {
         self.matchCase = matchCase
         self.matchWholeWord = matchWholeWord
         self.matchPath = matchPath
+        self.regex = regex
+        self.inFolder = inFolder
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        matchCase = try container.decodeIfPresent(Bool.self, forKey: .matchCase) ?? false
+        matchWholeWord = try container.decodeIfPresent(Bool.self, forKey: .matchWholeWord) ?? false
+        matchPath = try container.decodeIfPresent(Bool.self, forKey: .matchPath) ?? false
+        regex = try container.decodeIfPresent(Bool.self, forKey: .regex) ?? false
+        inFolder = try container.decodeIfPresent(String.self, forKey: .inFolder) ?? ""
     }
 }
 

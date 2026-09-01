@@ -2,33 +2,39 @@
 import PackageDescription
 
 let package = Package(
-    name: "Everything",
+    name: "SailfishEverything",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Everything", targets: ["Everything"]),
-        .executable(name: "EverythingTestRunner", targets: ["EverythingTestRunner"]),
-        .library(name: "EverythingCore", targets: ["EverythingCore"]),
+        .executable(name: "SailfishEverything", targets: ["SailfishEverything"]),
+        .executable(name: "SailfishEverythingTests", targets: ["SailfishEverythingTests"]),
+        .library(name: "SailfishEverythingCore", targets: ["SailfishEverythingCore"]),
     ],
     targets: [
         .target(
-            name: "EverythingCore",
-            path: "Sources/EverythingCore",
+            name: "SailfishEverythingCore",
+            path: "Sources/SailfishEverythingCore",
+            exclude: ["SPEC.md"],
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
         ),
         .executableTarget(
-            name: "Everything",
-            dependencies: ["EverythingCore"],
-            path: "Sources/Everything",
+            name: "SailfishEverything",
+            dependencies: ["SailfishEverythingCore"],
+            path: "Sources/SailfishEverything",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
+            ],
+            linkerSettings: [
+                .linkedFramework("Carbon"),
+                .linkedFramework("ServiceManagement"),
+                .linkedFramework("Quartz"),
             ]
         ),
         .executableTarget(
-            name: "EverythingTestRunner",
-            dependencies: ["EverythingCore"],
-            path: "Tests/EverythingTests",
+            name: "SailfishEverythingTests",
+            dependencies: ["SailfishEverythingCore"],
+            path: "Tests/SailfishEverythingTests",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
