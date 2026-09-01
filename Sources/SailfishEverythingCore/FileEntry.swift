@@ -2,10 +2,10 @@ import Foundation
 
 public struct FileEntry: Sendable, Equatable {
     public let name: String
-    public let nameLower: String
+    public var nameLower: String { name.fastLowercased() }
     public let directory: String
-    public let path: String
-    public let pathLower: String
+    public var path: String { Self.joinedPath(directory: directory, name: name) }
+    public var pathLower: String { path.fastLowercased() }
     public let size: Int64?
     public let modified: Date?
     public let created: Date?
@@ -21,14 +21,8 @@ public struct FileEntry: Sendable, Equatable {
         isDirectory: Bool = false,
         isCloudOnly: Bool = false
     ) {
-        let path = directory.hasSuffix("/") || directory.isEmpty
-            ? directory + name
-            : directory + "/" + name
         self.name = name
-        self.nameLower = name.fastLowercased()
         self.directory = directory
-        self.path = path
-        self.pathLower = path.fastLowercased()
         self.size = size
         self.modified = modified
         self.created = created
@@ -36,28 +30,28 @@ public struct FileEntry: Sendable, Equatable {
         self.isCloudOnly = isCloudOnly
     }
 
-    public init(
-        name: String,
-        nameLower: String,
-        directory: String,
-        path: String,
-        pathLower: String,
-        size: Int64?,
-        modified: Date?,
-        created: Date? = nil,
-        isDirectory: Bool,
-        isCloudOnly: Bool
-    ) {
-        self.name = name
-        self.nameLower = nameLower
-        self.directory = directory
-        self.path = path
-        self.pathLower = pathLower
-        self.size = size
-        self.modified = modified
-        self.created = created
-        self.isDirectory = isDirectory
-        self.isCloudOnly = isCloudOnly
+    static func joinedPath(directory: String, name: String) -> String {
+        if directory.isEmpty || directory.hasSuffix("/") {
+            return directory + name
+        }
+        return directory + "/" + name
+    }
+
+    public static func parentDirectory(fromPath path: String, name: String) -> String {
+        if path.count == name.count { return "" }
+        guard path.hasSuffix(name) else {
+            if let slash = path.lastIndex(of: "/") {
+                return String(path[..<slash])
+            }
+            return ""
+        }
+        let prefixCount = path.count - name.count
+        if prefixCount == 0 { return "" }
+        let slash = path.index(path.startIndex, offsetBy: prefixCount - 1)
+        if path[slash] == "/" {
+            return String(path[..<slash])
+        }
+        return String(path.dropLast(name.count))
     }
 }
 

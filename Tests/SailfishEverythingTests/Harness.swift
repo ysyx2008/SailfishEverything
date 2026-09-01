@@ -22,6 +22,11 @@ func expect(_ condition: @autoclosure () -> Bool, _ message: String = "expect fa
     }
 }
 
+func bench(_ name: String, _ ms: Double) {
+    guard ProcessInfo.processInfo.environment["SAILFISH_BENCH"] == "1" else { return }
+    print(String(format: "bench %6.2fms  %@", ms, name as NSString))
+}
+
 func expectEqual<T: Equatable>(_ lhs: T, _ rhs: T, file: String = #fileID, line: Int = #line) throws {
     if lhs != rhs {
         throw Expectation.failed("\(lhs) != \(rhs)", file, line)

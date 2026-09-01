@@ -298,12 +298,10 @@ enum ProductFlowTests {
         try expect(orNames.contains("photo.jpg"))
         try expectEqual(Set(index.names(matching: "startwith:photo")), Set(["photo.jpg"]))
         try expect(index.names(matching: "endwith:.mp3").contains("song.mp3"))
-        let first = index.entry(at: 0)
-        try expect(first?.created == nil, "scan should not load creation date")
-        try expect(first?.size == nil, "scan should not load size")
-        if let first {
-            try expect(FileMetadata.created(of: first) != nil)
-        }
+        let photo = index.entries(at: index.search(query: "photo.jpg")).first
+        try expectEqual(photo?.size, 1)
+        try expect(photo?.modified != nil)
+        try expect(photo?.created != nil)
     }
 
     private static func windowIsDesignatedInit() throws {

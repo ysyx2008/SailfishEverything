@@ -22,6 +22,8 @@ public final class FileScanner: @unchecked Sendable {
     private let enableWatch: Bool
     private let notifyOnMain: Bool
     private let queue = DispatchQueue(label: "everything.scanner", qos: .utility)
+    private let addQueue = DispatchQueue(label: "sailfish.index-add", qos: .utility)
+    private let addInflight = DispatchSemaphore(value: 12)
     private var stopFlag = false
     private var eventStream: FSEventStreamRef?
 
@@ -103,11 +105,13 @@ public final class FileScanner: @unchecked Sendable {
             return
         }
         policy = ScanPolicy.from(settings)
+        lastProgressNs = 0
         index.beginBulkLoad()
 
         notify { delegate in
             delegate.scanner(self, didBeginPhase: L10n.t(.homeFolder))
         }
+        let walkStart = DispatchTime.now()
         walkPublishing(rootPath)
 
         for extra in settings.extraRootURLs(home: home) {
@@ -117,6 +121,7 @@ public final class FileScanner: @unchecked Sendable {
             }
             walkPublishing(extra.path)
         }
+        let walkMs = Double(DispatchTime.now().uptimeNanoseconds - walkStart.uptimeNanoseconds) / 1_000_000
 
         index.endBulkLoad()
         let total = index.count
@@ -125,6 +130,10 @@ public final class FileScanner: @unchecked Sendable {
         }
 
         if !stopFlag {
+            let pathStart = DispatchTime.now()
+            index.buildPathIndex()
+            let pathMs = Double(DispatchTime.now().uptimeNanoseconds - pathStart.uptimeNanoseconds) / 1_000_000
+            benchScan(walkMs: walkMs, pathMs: pathMs, total: total)
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 self?.index.warmCaches()
             }
@@ -143,14 +152,42 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     private func walkPublishing(_ root: String) {
+        let pending = DispatchGroup()
         FastWalk.walk(
             root: root,
             rootPath: rootPath,
             policy: policy,
             stop: { self.stopFlag }
-        ) { batch in
-            self.publish(batch, notifyEntries: false)
+        ) { fragment in
+            guard fragment.origNamePack.count > 0 else { return }
+            self.addInflight.wait()
+            pending.enter()
+            self.addQueue.async {
+                let total = self.index.add(fragment)
+                self.publishProgress(total)
+                self.addInflight.signal()
+                pending.leave()
+            }
         }
+        pending.wait()
+        publishProgress(index.count, force: true)
+    }
+
+    private var lastProgressNs: UInt64 = 0
+
+    private func publishProgress(_ total: Int, force: Bool = false) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        if !force, now &- lastProgressNs < 80_000_000 { return }
+        lastProgressNs = now
+        notify { delegate in
+            delegate.scanner(self, didAdd: [], total: total)
+        }
+    }
+
+    private func benchScan(walkMs: Double, pathMs: Double, total: Int) {
+        guard ProcessInfo.processInfo.environment["SAILFISH_BENCH"] == "1", total >= 1_000 else { return }
+        print(String(format: "bench %6.2fms  scan walk+merge %d", walkMs, total))
+        print(String(format: "bench %6.2fms  scan path index", pathMs))
     }
 
     private func scanTree(_ root: URL, reportFailure: Bool = true, append: (FileEntry) -> Void) {
@@ -225,16 +262,10 @@ public final class FileScanner: @unchecked Sendable {
         let isUbiquitous = values.isUbiquitousItem == true
         let downloadStatus = values.ubiquitousItemDownloadingStatus
         let cloudOnly = isUbiquitous && downloadStatus != nil && downloadStatus != .current
-        let (path, directory) = alignedPaths(for: url, rootPath: rootPath)
+        let (_, directory) = alignedPaths(for: url, rootPath: rootPath)
         return FileEntry(
             name: name,
-            nameLower: name.lowercased(),
             directory: directory,
-            path: path,
-            pathLower: path.lowercased(),
-            size: nil,
-            modified: nil,
-            created: nil,
             isDirectory: isDirectory,
             isCloudOnly: cloudOnly
         )

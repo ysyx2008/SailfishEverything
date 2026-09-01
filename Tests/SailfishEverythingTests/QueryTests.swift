@@ -224,6 +224,8 @@ enum QueryTests {
         ])
         try expectEqual(index.names(matching: "parent:公司文件"), ["合同.pdf"])
         try expectEqual(index.names(matching: "parent:Downloads"), ["notes.txt"])
+        try expectEqual(index.names(matching: "parent:Down*"), ["notes.txt"])
+        try expectEqual(index.names(matching: "parent:?????oads"), ["notes.txt"])
         try expect(index.names(matching: "parent:").isEmpty)
         try expectEqual(index.names(matching: "name:合同"), ["合同.pdf"])
         try expect(index.names(matching: "name:OneDrive", options: SearchOptions(matchPath: true)).isEmpty)

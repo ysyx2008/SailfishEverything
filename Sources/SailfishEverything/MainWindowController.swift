@@ -81,6 +81,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private var sort = SortState()
     private var query = ""
     private var resultIndices: [Int] = []
+    private var showingIdentity = false
     private var lastSearch: SearchCursor?
     private var searchGeneration = 0
     private let searchLock = NSLock()
@@ -89,6 +90,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private var indexingPhase = L10n.t(.homeFolder)
     private var indexedCount = 0
     private var refreshPending = false
+    private var paintedRow = -1
+    private var paintedEntry: FileEntry?
+    private var statusGeneration = 0
+    private var lastScanTableNs: UInt64 = 0
+    private var scanTablePending = false
 
     private let dateFormatter = PathDisplay.dateFormatter
     private var folderIcon: NSImage!
@@ -309,6 +315,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         rerunSearch()
     }
 
+    private var displayedCount: Int {
+        showingIdentity ? index.count : resultIndices.count
+    }
+
+    private func indexAtRow(_ row: Int) -> Int? {
+        if showingIdentity {
+            return row >= 0 && row < index.count ? row : nil
+        }
+        return row >= 0 && row < resultIndices.count ? resultIndices[row] : nil
+    }
+
+    private func displayedIndices() -> [Int] {
+        showingIdentity ? Array(0..<index.count) : resultIndices
+    }
+
     private func rerunSearch() {
         searchLock.lock()
         searchGeneration += 1
@@ -318,7 +339,30 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         let options = self.options
         let filter = self.filter
         let sort = self.sort
-        let previous = lastSearch
+        if FileIndex.presentsUnsortedIdentity(
+            query: query,
+            options: options,
+            filter: filter,
+            sort: sort,
+            total: index.count,
+            allowFullSort: !isIndexing
+        ) {
+            showingIdentity = true
+            resultIndices = []
+            lastSearch = SearchCursor(query: query, options: options, filter: filter, sort: sort, indices: [])
+            paintedRow = -1
+            paintedEntry = nil
+            tableView.reloadData()
+            updateStatus()
+            return
+        }
+        showingIdentity = false
+        let previous: SearchCursor?
+        if let last = lastSearch, !last.query.isEmpty || last.indices.count <= 8_192 {
+            previous = last
+        } else {
+            previous = nil
+        }
         let allowFullSort = !isIndexing
         searchQueue.async { [weak self] in
             guard let self else { return }
@@ -339,8 +383,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             )
             DispatchQueue.main.async {
                 guard stillCurrent() else { return }
-                self.lastSearch = SearchCursor(query: query, options: options, filter: filter, sort: sort, indices: indices)
+                let stored = query.isEmpty && indices.count > 8_192 ? [] : indices
+                self.lastSearch = SearchCursor(query: query, options: options, filter: filter, sort: sort, indices: stored)
+                self.showingIdentity = false
                 self.resultIndices = indices
+                self.paintedRow = -1
+                self.paintedEntry = nil
                 self.tableView.reloadData()
                 self.updateStatus()
             }
@@ -359,11 +407,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     private func updateStatus() {
-        let objects = resultIndices.count
+        updateStatus(includeSelectionBytes: false)
+        guard (tableView?.selectedRowIndexes.count ?? 0) > 0 else { return }
+        statusGeneration += 1
+        let generation = statusGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self, self.statusGeneration == generation else { return }
+            self.updateStatus(includeSelectionBytes: true)
+        }
+    }
+
+    private func updateStatus(includeSelectionBytes: Bool) {
+        let objects = displayedCount
         let selected = tableView?.selectedRowIndexes.count ?? 0
-        let bytes: Int64 = selected > 0
-            ? selectedEntries().reduce(0) { $0 + (FileMetadata.size(of: $1) ?? 0) }
-            : 0
+        let bytes: Int64
+        if includeSelectionBytes, selected > 0 {
+            bytes = index.totalBytes(at: selectedIndexList())
+        } else {
+            bytes = 0
+        }
         var left = L10n.statusLine(objects: objects, selected: selected, bytes: bytes)
         if isIndexing {
             left = L10n.format(.indexing, indexingPhase)
@@ -449,10 +511,32 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         NSPasteboard.general.setString(strings.joined(separator: "\n"), forType: .string)
     }
 
+    private func selectedIndexList() -> [Int] {
+        let rows = tableView.selectedRowIndexes
+        guard !rows.isEmpty else { return [] }
+        if showingIdentity, let first = rows.min(), let last = rows.max(), rows.count == last - first + 1 {
+            return Array(first...last)
+        }
+        var indices: [Int] = []
+        indices.reserveCapacity(rows.count)
+        for row in rows {
+            if let index = indexAtRow(row) {
+                indices.append(index)
+            }
+        }
+        return indices
+    }
+
     private func selectedEntries() -> [FileEntry] {
-        index.entries(at: tableView.selectedRowIndexes.compactMap { row in
-            row < resultIndices.count ? resultIndices[row] : nil
-        })
+        index.entries(at: selectedIndexList())
+    }
+
+    private func entryForDisplay(row: Int) -> FileEntry? {
+        if row == paintedRow, let paintedEntry { return paintedEntry }
+        guard let entryIndex = indexAtRow(row), let entry = index.entry(at: entryIndex) else { return nil }
+        paintedRow = row
+        paintedEntry = entry
+        return entry
     }
 
     @objc func toggleMatchCase(_ sender: Any?) {
@@ -531,11 +615,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         let selected = tableView.selectedRowIndexes
         let exportIndices: [Int]
         if selected.count > 0 {
-            exportIndices = selected.compactMap { row in
-                row < resultIndices.count ? resultIndices[row] : nil
-            }
+            exportIndices = selected.compactMap { indexAtRow($0) }
         } else {
-            exportIndices = resultIndices
+            exportIndices = displayedIndices()
         }
         let entries = index.entries(at: exportIndices)
         let body = url.pathExtension.lowercased() == "txt" ? ResultExport.txt(entries) : ResultExport.csv(entries)
@@ -644,8 +726,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         isIndexing = true
         indexingPhase = L10n.t(.homeFolder)
         indexedCount = 0
+        showingIdentity = false
         resultIndices = []
         lastSearch = nil
+        paintedRow = -1
+        paintedEntry = nil
         tableView.reloadData()
         updateStatus()
         scanner.rebuild()
@@ -670,8 +755,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         isIndexing = true
         indexingPhase = L10n.t(.homeFolder)
         indexedCount = 0
+        showingIdentity = false
         resultIndices = []
         lastSearch = nil
+        paintedRow = -1
+        paintedEntry = nil
         tableView.reloadData()
         updateStatus()
         scanner.apply(newSettings)
@@ -726,12 +814,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     // MARK: - Table
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        resultIndices.count
+        displayedCount
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row < resultIndices.count, let entry = index.entry(at: resultIndices[row]),
-              let tableColumn else { return nil }
+        guard let tableColumn, let entry = entryForDisplay(row: row) else { return nil }
         let id = tableColumn.identifier.rawValue
         let cellID = NSUserInterfaceItemIdentifier("cell-\(id)")
         let cell = tableView.makeView(withIdentifier: cellID, owner: self) as? NSTableCellView ?? {
@@ -780,10 +867,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             cell.textField?.stringValue = PathDisplay.pretty(entry.directory)
             cell.textField?.alignment = .left
         case "size":
-            cell.textField?.stringValue = PathDisplay.formatSize(FileMetadata.size(of: entry), isDirectory: entry.isDirectory)
+            cell.textField?.stringValue = PathDisplay.formatSize(entry.size, isDirectory: entry.isDirectory)
             cell.textField?.alignment = .right
         case "modified":
-            cell.textField?.stringValue = PathDisplay.formatDate(FileMetadata.modified(of: entry))
+            cell.textField?.stringValue = PathDisplay.formatDate(entry.modified)
             cell.textField?.alignment = .left
         default:
             break
@@ -845,7 +932,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
         guard tableView === self.tableView else { return nil }
-        guard row < resultIndices.count, let entry = index.entry(at: resultIndices[row]) else { return nil }
+        guard let entryIndex = indexAtRow(row), let entry = index.entry(at: entryIndex) else { return nil }
         return URL(fileURLWithPath: entry.path) as NSURL
     }
 
@@ -869,8 +956,39 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     func scanner(_ scanner: FileScanner, didAdd batch: [FileEntry], total: Int) {
         indexedCount = total
+        if FileIndex.presentsUnsortedIdentity(
+            query: query,
+            options: options,
+            filter: filter,
+            sort: sort,
+            total: total,
+            allowFullSort: false
+        ) {
+            showingIdentity = true
+            resultIndices = []
+            scheduleScanTable()
+            updateStatus()
+            return
+        }
         scheduleSearchRefresh()
         updateStatus()
+    }
+
+    private func scheduleScanTable() {
+        let now = DispatchTime.now().uptimeNanoseconds
+        if now &- lastScanTableNs >= 200_000_000 {
+            lastScanTableNs = now
+            tableView.noteNumberOfRowsChanged()
+            return
+        }
+        guard !scanTablePending else { return }
+        scanTablePending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self else { return }
+            self.scanTablePending = false
+            self.lastScanTableNs = DispatchTime.now().uptimeNanoseconds
+            self.tableView.noteNumberOfRowsChanged()
+        }
     }
 
     func scannerDidFinish(_ scanner: FileScanner, total: Int) {

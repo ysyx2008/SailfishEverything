@@ -32,6 +32,146 @@ public indirect enum QueryTerm: Equatable, Sendable {
     case not(QueryTerm)
 }
 
+indirect enum PackedAtom: Equatable {
+    case contains(String)
+    case prefix(String)
+    case suffix(String)
+    case exact(String)
+    case files
+    case folders
+    case anySuffix([String])
+    case pathContains(String)
+    case nameContains(String)
+    case prefixAndSuffix(String, String)
+    case parentContains(String)
+    case parentGlob(String)
+    case question(String)
+    case glob(String)
+    case nameGlob(String)
+    case pathGlob(String)
+    case nameLength(SizeCompare)
+    case fileSize(SizeCompare)
+    case modified(DateCompare)
+    case created(DateCompare)
+    case emptyFile
+    case not(PackedAtom)
+
+    init?(term: QueryTerm) {
+        switch term {
+        case .not(let inner):
+            guard let atom = PackedAtom(term: inner) else { return nil }
+            self = .not(atom)
+        case .parent(let text) where !text.isEmpty && !text.contains("*") && !text.contains("?"):
+            self = .parentContains(text)
+        case .parent(let text) where !text.isEmpty:
+            self = .parentGlob(text)
+        case .text(let text) where text.contains("*") && text.contains("?"):
+            self = .glob(text)
+        case .text(let text) where text.contains("?"):
+            self = .question(text)
+        case .text(let text) where text.contains("*"):
+            guard let atom = PackedAtom.fromWildcard(text) else { return nil }
+            self = atom
+        case .text(let text):
+            self = .contains(text)
+        case .startsWith(let text) where !text.isEmpty && !text.contains("*") && !text.contains("?"):
+            self = .prefix(text)
+        case .endsWith(let text) where !text.isEmpty && !text.contains("*") && !text.contains("?"):
+            self = .suffix(text)
+        case .exact(let text) where !text.isEmpty && !text.contains("*") && !text.contains("?"):
+            self = .exact(text)
+        case .name(let text) where !text.isEmpty && !text.contains("*") && !text.contains("?"):
+            self = .nameContains(text)
+        case .name(let text) where !text.isEmpty:
+            self = .nameGlob(text)
+        case .path(let text) where !text.isEmpty && !text.contains("*") && !text.contains("?"):
+            self = .pathContains(text)
+        case .path(let text) where !text.isEmpty:
+            self = .pathGlob(text)
+        case .regex(let pattern) where !pattern.isEmpty:
+            guard let atom = PackedAtom.fromRegex(pattern) else { return nil }
+            self = atom
+        case .fileOnly:
+            self = .files
+        case .folderOnly:
+            self = .folders
+        case .ext(let list) where !list.isEmpty:
+            self = .anySuffix(list.map { $0.hasPrefix(".") ? $0.lowercased() : "." + $0.lowercased() })
+        case .nameLength(let pred):
+            self = .nameLength(pred)
+        case .size(let pred):
+            self = .fileSize(pred)
+        case .date(let pred):
+            self = .modified(pred)
+        case .created(let pred):
+            self = .created(pred)
+        case .emptyFile:
+            self = .emptyFile
+        default:
+            return nil
+        }
+    }
+
+    private static func fromWildcard(_ pattern: String) -> PackedAtom? {
+        let parts = pattern.split(separator: "*", omittingEmptySubsequences: false).map(String.init)
+        if parts.count == 3, parts[0].isEmpty, parts[2].isEmpty, !parts[1].isEmpty {
+            return .contains(parts[1])
+        }
+        if parts.count == 2, parts[1].isEmpty, !parts[0].isEmpty {
+            return .prefix(parts[0])
+        }
+        if parts.count == 2, parts[0].isEmpty, !parts[1].isEmpty {
+            return .suffix(parts[1])
+        }
+        if parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty {
+            return .prefixAndSuffix(parts[0], parts[1])
+        }
+        return .glob(pattern)
+    }
+
+    static func fromRegex(_ pattern: String) -> PackedAtom? {
+        var literal: [UInt8] = []
+        var anchoredStart = false
+        var anchoredEnd = false
+        let bytes = Array(pattern.utf8)
+        var i = 0
+        if i < bytes.count, bytes[i] == 0x5E {
+            anchoredStart = true
+            i += 1
+        }
+        while i < bytes.count {
+            let byte = bytes[i]
+            if byte == 0x24, i == bytes.count - 1 {
+                anchoredEnd = true
+                break
+            }
+            if byte == 0x5C, i + 1 < bytes.count {
+                literal.append(bytes[i + 1])
+                i += 2
+                continue
+            }
+            if isRegexMeta(byte) { return nil }
+            literal.append(byte)
+            i += 1
+        }
+        guard !literal.isEmpty else { return nil }
+        let text = String(decoding: literal, as: UTF8.self)
+        if anchoredStart && anchoredEnd { return .exact(text) }
+        if anchoredStart { return .prefix(text) }
+        if anchoredEnd { return .suffix(text) }
+        return .contains(text)
+    }
+
+    private static func isRegexMeta(_ byte: UInt8) -> Bool {
+        switch byte {
+        case 0x2E, 0x5E, 0x24, 0x2A, 0x2B, 0x3F, 0x28, 0x29, 0x5B, 0x5D, 0x7B, 0x7D, 0x7C:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 public struct Query: Equatable, Sendable {
     public var orGroups: [[QueryTerm]]
 
@@ -63,20 +203,32 @@ public struct Query: Equatable, Sendable {
     }
 
     public var packedTextGroups: [[String]]? {
-        guard !orGroups.isEmpty else { return nil }
+        guard let atoms = packedAtoms else { return nil }
         var groups: [[String]] = []
-        groups.reserveCapacity(orGroups.count)
-        for group in orGroups {
-            guard !group.isEmpty else { return nil }
+        for group in atoms {
             var texts: [String] = []
-            texts.reserveCapacity(group.count)
-            for term in group {
-                guard case .text(let text) = term, !text.contains("*"), !text.contains("?") else {
-                    return nil
-                }
+            for atom in group {
+                guard case .contains(let text) = atom else { return nil }
                 texts.append(text)
             }
             groups.append(texts)
+        }
+        return groups
+    }
+
+    var packedAtoms: [[PackedAtom]]? {
+        guard !orGroups.isEmpty else { return nil }
+        var groups: [[PackedAtom]] = []
+        groups.reserveCapacity(orGroups.count)
+        for group in orGroups {
+            guard !group.isEmpty else { return nil }
+            var atoms: [PackedAtom] = []
+            atoms.reserveCapacity(group.count)
+            for term in group {
+                guard let atom = PackedAtom(term: term) else { return nil }
+                atoms.append(atom)
+            }
+            groups.append(atoms)
         }
         return groups
     }

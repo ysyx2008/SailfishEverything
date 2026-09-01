@@ -95,6 +95,26 @@ public enum FileMetadata {
         entry.created ?? load(entry.path).created
     }
 
+    public static func prefetch(paths: [String]) {
+        var missing: [String] = []
+        missing.reserveCapacity(min(paths.count, 128))
+        lock.lock()
+        for path in paths where cache[path] == nil {
+            missing.append(path)
+        }
+        lock.unlock()
+        guard !missing.isEmpty else { return }
+        if missing.count < 24 {
+            for path in missing {
+                _ = load(path)
+            }
+            return
+        }
+        DispatchQueue.concurrentPerform(iterations: missing.count) { offset in
+            _ = load(missing[offset])
+        }
+    }
+
     public static func prefetch(entries: [FileEntry], indices: [Int]) {
         var paths: [String] = []
         paths.reserveCapacity(min(indices.count, 128))
