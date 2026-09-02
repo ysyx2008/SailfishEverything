@@ -64,6 +64,7 @@ public final class FileScanner: @unchecked Sendable {
 
     public func rebuild() {
         stopFlag = true
+        DiagnosticLog.shared.event("scan", "rebuild")
         queue.async { [weak self] in
             guard let self else { return }
             self.stopEvents()
@@ -75,6 +76,7 @@ public final class FileScanner: @unchecked Sendable {
 
     public func apply(_ settings: IndexSettings) {
         stopFlag = true
+        DiagnosticLog.shared.event("scan", "apply settings")
         queue.async { [weak self] in
             guard let self else { return }
             self.stopEvents()
@@ -95,6 +97,7 @@ public final class FileScanner: @unchecked Sendable {
         let home = URL(fileURLWithPath: rootPath, isDirectory: true)
         var homeIsDir: ObjCBool = false
         if !FileManager.default.fileExists(atPath: rootPath, isDirectory: &homeIsDir) || !homeIsDir.boolValue {
+            DiagnosticLog.shared.event("scan", "fail \(L10n.t(.homeMissing))")
             notify { delegate in
                 delegate.scannerDidFail(self, error: NSError(
                     domain: "SailfishEverything",
@@ -106,11 +109,14 @@ public final class FileScanner: @unchecked Sendable {
         }
         policy = ScanPolicy.from(settings)
         lastProgressNs = 0
+        lastDiagNs = 0
+        DiagnosticLog.shared.event("scan", "begin")
         index.beginBulkLoad()
 
         notify { delegate in
             delegate.scanner(self, didBeginPhase: L10n.t(.homeFolder))
         }
+        DiagnosticLog.shared.event("scan", "phase \(L10n.t(.homeFolder))")
         let walkStart = DispatchTime.now()
         walkPublishing(rootPath)
 
@@ -119,25 +125,42 @@ public final class FileScanner: @unchecked Sendable {
             notify { delegate in
                 delegate.scanner(self, didBeginPhase: extra.lastPathComponent)
             }
+            DiagnosticLog.shared.event("scan", "phase \(extra.lastPathComponent)")
             walkPublishing(extra.path)
         }
-        let walkMs = Double(DispatchTime.now().uptimeNanoseconds - walkStart.uptimeNanoseconds) / 1_000_000
+        let walkMs = DiagnosticLog.elapsedMilliseconds(since: walkStart)
+        DiagnosticLog.shared.event("scan", "walk done \(DiagnosticLog.formatDuration(walkMs))")
 
+        DiagnosticLog.shared.event("scan", "merge begin")
+        let mergeStart = DispatchTime.now()
         index.endBulkLoad()
         let total = index.count
+        DiagnosticLog.shared.event(
+            "scan",
+            "merge done total=\(total) \(DiagnosticLog.formatDuration(DiagnosticLog.elapsedMilliseconds(since: mergeStart)))"
+        )
         notify { delegate in
             delegate.scannerDidFinish(self, total: total)
         }
 
         if !stopFlag {
+            DiagnosticLog.shared.event("scan", "path index begin")
             let pathStart = DispatchTime.now()
             index.buildPathIndex()
-            let pathMs = Double(DispatchTime.now().uptimeNanoseconds - pathStart.uptimeNanoseconds) / 1_000_000
+            let pathMs = DiagnosticLog.elapsedMilliseconds(since: pathStart)
+            DiagnosticLog.shared.event("scan", "path index done \(DiagnosticLog.formatDuration(pathMs))")
             benchScan(walkMs: walkMs, pathMs: pathMs, total: total)
             DispatchQueue.global(qos: .utility).async { [weak self] in
+                DiagnosticLog.shared.event("scan", "warm begin")
+                let warmStart = DispatchTime.now()
                 self?.index.warmCaches()
+                DiagnosticLog.shared.event(
+                    "scan",
+                    "warm done \(DiagnosticLog.formatDuration(DiagnosticLog.elapsedMilliseconds(since: warmStart)))"
+                )
             }
         }
+        DiagnosticLog.shared.event("scan", "finish total=\(total)")
         if !stopFlag, enableWatch {
             startEvents()
         }
@@ -174,11 +197,16 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     private var lastProgressNs: UInt64 = 0
+    private var lastDiagNs: UInt64 = 0
 
     private func publishProgress(_ total: Int, force: Bool = false) {
         let now = DispatchTime.now().uptimeNanoseconds
         if !force, now &- lastProgressNs < 80_000_000 { return }
         lastProgressNs = now
+        if force || lastDiagNs == 0 || now &- lastDiagNs >= 2_000_000_000 {
+            lastDiagNs = now
+            DiagnosticLog.shared.event("scan", "progress \(total)")
+        }
         notify { delegate in
             delegate.scanner(self, didAdd: [], total: total)
         }
@@ -202,6 +230,7 @@ public final class FileScanner: @unchecked Sendable {
             errorHandler: { _, _ in true }
         ) else {
             if reportFailure {
+                DiagnosticLog.shared.event("scan", "fail \(L10n.t(.scanFailed))")
                 notify { delegate in
                     delegate.scannerDidFail(self, error: NSError(
                         domain: "SailfishEverything",

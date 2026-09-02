@@ -88,6 +88,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private let searchLock = NSLock()
     private let searchQueue = DispatchQueue(label: "sailfish.search", qos: .userInteractive)
     private var isIndexing = true
+    private var isSearching = false
     private var indexingPhase = L10n.t(.homeFolder)
     private var indexedCount = 0
     private var refreshPending = false
@@ -349,16 +350,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             total: index.count,
             allowFullSort: !isIndexing
         ) {
+            isSearching = false
             showingIdentity = true
             resultIndices = []
             lastSearch = SearchCursor(query: query, options: options, filter: filter, sort: sort, indices: [])
             paintedRow = -1
             paintedEntry = nil
-            tableView.reloadData()
+            DiagnosticLog.shared.event("search", "identity rows=\(index.count)")
+            reloadTable(reason: "identity")
             updateStatus()
             return
         }
         showingIdentity = false
+        isSearching = true
+        updateStatus()
         let previous: SearchCursor?
         if let last = lastSearch, !last.query.isEmpty || last.indices.count <= 8_192 {
             previous = last
@@ -366,6 +371,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             previous = nil
         }
         let allowFullSort = !isIndexing
+        let clipped = DiagnosticLog.clipQuery(query)
+        DiagnosticLog.shared.event("search", "start q=\"\(clipped)\" indexing=\(isIndexing ? "yes" : "no")")
         searchQueue.async { [weak self] in
             guard let self else { return }
             let stillCurrent: () -> Bool = {
@@ -373,8 +380,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
                 defer { self.searchLock.unlock() }
                 return self.searchGeneration == generation
             }
-            guard stillCurrent() else { return }
+            guard stillCurrent() else {
+                DiagnosticLog.shared.event("search", "drop q=\"\(clipped)\"")
+                return
+            }
             let opened = self.settings.preferOpened ? self.openedCounts : [:]
+            let searchStart = DispatchTime.now()
             let indices = self.index.search(
                 query: query,
                 options: options,
@@ -385,18 +396,36 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
                 openedCounts: opened,
                 shouldContinue: stillCurrent
             )
+            let searchMs = DiagnosticLog.elapsedMilliseconds(since: searchStart)
+            DiagnosticLog.shared.event(
+                "search",
+                "done q=\"\(clipped)\" hits=\(indices.count) \(DiagnosticLog.formatDuration(searchMs))"
+            )
             DispatchQueue.main.async {
-                guard stillCurrent() else { return }
+                guard stillCurrent() else {
+                    DiagnosticLog.shared.event("search", "stale q=\"\(clipped)\"")
+                    return
+                }
                 let stored = query.isEmpty && indices.count > 8_192 ? [] : indices
                 self.lastSearch = SearchCursor(query: query, options: options, filter: filter, sort: sort, indices: stored)
                 self.showingIdentity = false
                 self.resultIndices = indices
                 self.paintedRow = -1
                 self.paintedEntry = nil
-                self.tableView.reloadData()
+                self.isSearching = false
+                self.reloadTable(reason: "search")
                 self.updateStatus()
             }
         }
+    }
+
+    private func reloadTable(reason: String) {
+        let rows = displayedCount
+        DiagnosticLog.shared.event("table", "reload start \(reason) rows=\(rows)")
+        let start = DispatchTime.now()
+        tableView.reloadData()
+        let ms = DiagnosticLog.elapsedMilliseconds(since: start)
+        DiagnosticLog.shared.event("table", "reload done \(reason) \(DiagnosticLog.formatDuration(ms))")
     }
 
     private func scheduleSearchRefresh() {
@@ -431,6 +460,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             bytes = 0
         }
         var left = L10n.statusLine(objects: objects, selected: selected, bytes: bytes)
+        if isSearching {
+            left = L10n.t(.searching) + left
+        }
         if isIndexing {
             left = L10n.format(.indexing, indexingPhase)
                 + L10n.format(.indexedCount, ResultStats.formatCount(indexedCount))
@@ -773,7 +805,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         lastSearch = nil
         paintedRow = -1
         paintedEntry = nil
-        tableView.reloadData()
+        reloadTable(reason: "rebuild")
         updateStatus()
         scanner.rebuild()
     }
@@ -812,7 +844,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         lastSearch = nil
         paintedRow = -1
         paintedEntry = nil
-        tableView.reloadData()
+        reloadTable(reason: "settings")
         updateStatus()
         scanner.apply(newSettings)
     }
@@ -1030,7 +1062,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         let now = DispatchTime.now().uptimeNanoseconds
         if now &- lastScanTableNs >= 200_000_000 {
             lastScanTableNs = now
-            tableView.noteNumberOfRowsChanged()
+            noteRowsChanged()
             return
         }
         guard !scanTablePending else { return }
@@ -1039,7 +1071,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             guard let self else { return }
             self.scanTablePending = false
             self.lastScanTableNs = DispatchTime.now().uptimeNanoseconds
-            self.tableView.noteNumberOfRowsChanged()
+            self.noteRowsChanged()
+        }
+    }
+
+    private func noteRowsChanged() {
+        let start = DispatchTime.now()
+        tableView.noteNumberOfRowsChanged()
+        let ms = DiagnosticLog.elapsedMilliseconds(since: start)
+        if ms >= 50 {
+            DiagnosticLog.shared.event(
+                "table",
+                "rows changed \(DiagnosticLog.formatDuration(ms)) count=\(displayedCount)"
+            )
         }
     }
 

@@ -7,6 +7,7 @@ let failed = runTests(
     SearchUnitTests.cases
         + PathDisplayTests.cases
         + L10nTests.cases
+        + DiagnosticLogTests.cases
         + ScanPolicyTests.cases
         + IndexSettingsTests.cases
         + IndexRegressionTests.cases

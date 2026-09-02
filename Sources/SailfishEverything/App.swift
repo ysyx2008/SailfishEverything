@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             hotKey.register(AppHotKeyStore.load())
         }
         controller.showMainWindow()
+        DiagnosticLog.shared.event("session", "start")
         DispatchQueue.main.async { [weak self] in
             self?.windowController?.showMainWindow()
             self?.showOnboardingIfNeeded()
@@ -212,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(helpItem)
         let help = NSMenu(title: L10n.t(.helpMenu))
         help.addItem(withTitle: L10n.t(.searchSyntax), action: #selector(showSearchHelp), keyEquivalent: "")
+        help.addItem(withTitle: L10n.t(.openDiagnosticLog), action: #selector(openDiagnosticLog), keyEquivalent: "")
         help.addItem(withTitle: L10n.t(.helpApp), action: #selector(showAbout), keyEquivalent: "?")
         helpItem.submenu = help
 
@@ -302,5 +304,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = L10n.t(.syntaxBody)
         alert.alertStyle = .informational
         alert.runModal()
+    }
+
+    @objc private func openDiagnosticLog() {
+        let log = DiagnosticLog.shared
+        log.ensureFileExists()
+        log.event("session", "open log")
+        if !NSWorkspace.shared.open(log.fileURL) {
+            NSWorkspace.shared.activateFileViewerSelecting([log.fileURL])
+        }
     }
 }

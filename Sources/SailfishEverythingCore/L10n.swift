@@ -168,6 +168,8 @@ public enum L10n {
         case columnSize
         case columnModified
         case indexing
+        case searching
+        case openDiagnosticLog
         case invalidRegex
         case homeFolder
         case aboutBody
@@ -302,6 +304,8 @@ public enum L10n {
             .columnSize: "Size",
             .columnModified: "Date Modified",
             .indexing: "Indexing %@… ",
+            .searching: "Searching… ",
+            .openDiagnosticLog: "Open Diagnostic Log",
             .invalidRegex: "Invalid regex · ",
             .homeFolder: "Home folder",
             .aboutBody: "Filename search for Mac.\nType to filter. The toggle hotkey is in Settings.\nIndexes your home folder. Cloud drives such as iCloud and OneDrive are skipped by default — they are too slow. Extra disks can be added in Settings.\n© 2026 Sailfish",
@@ -442,6 +446,8 @@ public enum L10n {
             .columnSize: "大小",
             .columnModified: "修改日期",
             .indexing: "正在索引%@… ",
+            .searching: "正在搜索… ",
+            .openDiagnosticLog: "打开诊断日志",
             .invalidRegex: "正则无效 · ",
             .homeFolder: "个人文件夹",
             .aboutBody: "Mac 上的文件名搜索。\n边敲边出。唤出窗口的快捷键在设置里改。\n索引个人文件夹。iCloud、OneDrive 这类云盘默认不扫，太慢。外置盘可在设置里另外添加。\n© 2026 旗鱼",
