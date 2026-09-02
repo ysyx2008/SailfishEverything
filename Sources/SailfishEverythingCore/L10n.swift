@@ -114,6 +114,13 @@ public enum L10n {
         }
     }
 
+    public static func includeLabel(_ item: String) -> String {
+        switch item {
+        case IndexSettings.wechatChatFilesInclude: return t(.includeWeChatChatFiles)
+        default: return item
+        }
+    }
+
     public enum Key: String, CaseIterable, Sendable {
         case showApp
         case quitApp
@@ -193,6 +200,8 @@ public enum L10n {
         case extraFolders
         case extraFolderPrompt
         case extraFolderMessage
+        case chooseFolder
+        case includeWeChatChatFiles
         case hotKey
         case hotKeyControlSpace
         case hotKeyOptionSpace
@@ -326,7 +335,7 @@ public enum L10n {
             .openFullDiskAccess: "Open Full Disk Access…",
             .diskAccessOK: "Protected folders are readable.",
             .diskAccessNeeded: "Without Full Disk Access, Library and some system locations will be incomplete.",
-            .scanHint: "Indexes your home folder. Cloud drives such as iCloud and OneDrive are skipped by default — they are too slow. Remove them from the exclude list if you want them searched. Add extra disks below.",
+            .scanHint: "Indexes your home folder. Cloud drives such as iCloud and OneDrive are skipped by default — they are too slow. Remove them from the exclude list if you want them searched. WeChat chat files are included by default. If you remove that item, add it back from the same list — you do not need to find the folder yourself. Other folders can be added even if they sit inside an excluded area.",
             .excludedFolders: "Excluded folders",
             .add: "Add…",
             .remove: "Remove",
@@ -336,7 +345,9 @@ public enum L10n {
             .excludeMessage: "Choose a folder to exclude from the index",
             .extraFolders: "Also index these folders",
             .extraFolderPrompt: "Index",
-            .extraFolderMessage: "Choose a folder or disk to include in the index",
+            .extraFolderMessage: "Choose a folder or disk to include. Folders inside an excluded area are allowed.",
+            .chooseFolder: "Choose Folder…",
+            .includeWeChatChatFiles: "WeChat chat files",
             .hotKey: "Toggle window",
             .hotKeyControlSpace: "Control-Space",
             .hotKeyOptionSpace: "Option-Space",
@@ -468,7 +479,7 @@ public enum L10n {
             .openFullDiskAccess: "打开「完全磁盘访问」…",
             .diskAccessOK: "已能读取受保护的文件夹。",
             .diskAccessNeeded: "没开完全磁盘访问时，资源库和部分系统位置会搜不全。",
-            .scanHint: "只扫个人文件夹。iCloud、OneDrive 这类云盘默认不扫，太慢；要搜的话从排除列表里去掉。缓存和开发目录默认也跳过。外置盘在下面另外加。",
+            .scanHint: "只扫个人文件夹。iCloud、OneDrive 这类云盘默认不扫，太慢；要搜的话从排除列表里去掉。缓存和开发目录默认也跳过。微信聊天文件默认会搜；去掉之后从纳入列表的添加里加回来即可，不必自己去翻。排除范围内的文件夹也可以单独加进来。",
             .excludedFolders: "排除的文件夹",
             .add: "添加…",
             .remove: "移除",
@@ -478,7 +489,9 @@ public enum L10n {
             .excludeMessage: "选择要从索引里排除的文件夹",
             .extraFolders: "也索引这些文件夹",
             .extraFolderPrompt: "索引",
-            .extraFolderMessage: "选择要加入索引的文件夹或磁盘",
+            .extraFolderMessage: "选择要加入索引的文件夹或磁盘。落在排除范围内的也可以。",
+            .chooseFolder: "选择文件夹…",
+            .includeWeChatChatFiles: "微信聊天文件",
             .hotKey: "显示或隐藏窗口",
             .hotKeyControlSpace: "Control-Space",
             .hotKeyOptionSpace: "Option-Space",

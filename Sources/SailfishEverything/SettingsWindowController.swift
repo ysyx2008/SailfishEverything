@@ -185,7 +185,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             extraScroll.topAnchor.constraint(equalTo: extraLabel.bottomAnchor, constant: 6),
             extraScroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             extraScroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            extraScroll.heightAnchor.constraint(equalToConstant: 90),
+            extraScroll.heightAnchor.constraint(equalToConstant: 110),
 
             addExtra.topAnchor.constraint(equalTo: extraScroll.bottomAnchor, constant: 8),
             addExtra.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
@@ -234,7 +234,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     private func reloadLists() {
         excludeList = settings.displayExcludes()
-        extraList = settings.extraRoots
+        extraList = settings.displayIncludes()
         excludeTable?.reloadData()
         extraTable?.reloadData()
     }
@@ -259,7 +259,34 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         }
     }
 
-    @objc private func addExtraFolder() {
+    @objc private func addExtraFolder(_ sender: Any) {
+        let missing = settings.missingDefaultIncludes
+        if missing.isEmpty {
+            pickExtraFolder()
+            return
+        }
+        let menu = NSMenu()
+        for key in missing {
+            let item = NSMenuItem(title: L10n.includeLabel(key), action: #selector(reenableDefaultInclude(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = key
+            menu.addItem(item)
+        }
+        menu.addItem(NSMenuItem.separator())
+        let browse = NSMenuItem(title: L10n.t(.chooseFolder), action: #selector(pickExtraFolder), keyEquivalent: "")
+        browse.target = self
+        menu.addItem(browse)
+        let view: NSView = (sender as? NSView) ?? extraTable
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.height + 2), in: view)
+    }
+
+    @objc private func reenableDefaultInclude(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        settings.enableDefaultInclude(key)
+        reloadLists()
+    }
+
+    @objc private func pickExtraFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -267,13 +294,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         panel.prompt = L10n.t(.extraFolderPrompt)
         panel.message = L10n.t(.extraFolderMessage)
         guard panel.runModal() == .OK else { return }
-        let home = AppRuntime.homeURL.resolvingSymlinksInPath().path
+        let home = AppRuntime.homeURL.resolvingSymlinksInPath()
+        let already = Set(settings.extraRootURLs(home: home).map(\.path))
         for url in panel.urls {
             let path = url.resolvingSymlinksInPath().path
-            if path == home || path.hasPrefix(home + "/") { continue }
-            if !settings.extraRoots.contains(path) {
-                settings.extraRoots.append(path)
-            }
+            if path == home.path { continue }
+            if already.contains(path) || settings.extraRoots.contains(path) { continue }
+            settings.extraRoots.append(path)
         }
         reloadLists()
     }
@@ -281,8 +308,14 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     @objc private func removeExtraFolder() {
         let row = extraTable.selectedRow
         guard row >= 0, row < extraList.count else { return }
-        let path = extraList[row]
-        settings.extraRoots.removeAll { $0 == path }
+        let item = extraList[row]
+        if IndexSettings.defaultIncludeKeys.contains(item) {
+            if !settings.disabledDefaultIncludes.contains(item) {
+                settings.disabledDefaultIncludes.append(item)
+            }
+        } else {
+            settings.extraRoots.removeAll { $0 == item }
+        }
         reloadLists()
     }
 
@@ -377,7 +410,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             return created
         }()
         if isExtra {
-            cell.textField?.stringValue = extraList[row]
+            cell.textField?.stringValue = L10n.includeLabel(extraList[row])
         } else {
             cell.textField?.stringValue = L10n.excludeLabel(excludeList[row])
         }

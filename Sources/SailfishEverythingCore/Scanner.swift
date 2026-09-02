@@ -122,10 +122,11 @@ public final class FileScanner: @unchecked Sendable {
 
         for extra in settings.extraRootURLs(home: home) {
             if stopFlag { break }
+            let title = settings.extraWalkTitle(for: extra, home: home)
             notify { delegate in
-                delegate.scanner(self, didBeginPhase: extra.lastPathComponent)
+                delegate.scanner(self, didBeginPhase: title)
             }
-            DiagnosticLog.shared.event("scan", "phase \(extra.lastPathComponent)")
+            DiagnosticLog.shared.event("scan", "phase \(title)")
             walkPublishing(extra.path)
         }
         let walkMs = DiagnosticLog.elapsedMilliseconds(since: walkStart)

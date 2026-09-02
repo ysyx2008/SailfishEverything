@@ -832,6 +832,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             || newSettings.disabledDefaultPrefixes != settings.disabledDefaultPrefixes
             || newSettings.disabledDefaultNames != settings.disabledDefaultNames
             || newSettings.extraRoots != settings.extraRoots
+            || newSettings.disabledDefaultIncludes != settings.disabledDefaultIncludes
         settings = newSettings
         if !AppRuntime.isE2E {
             IndexSettingsStore.save(newSettings)

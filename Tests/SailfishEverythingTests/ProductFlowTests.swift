@@ -13,6 +13,7 @@ enum ProductFlowTests {
         TestCase(name: "端到端.中文名叫旗鱼搜索", run: chineseProductNameIsQiyu),
         TestCase(name: "端到端.一次坐下从扫盘用到改文件", run: fullSitting),
         TestCase(name: "端到端.改排除后重扫", run: excludeThenRescan),
+        TestCase(name: "端到端.默认能搜到微信聊天文件", run: wechatChatFilesIncluded),
         TestCase(name: "端到端.限定文件夹", run: lookInFolder),
         TestCase(name: "端到端.退格后结果重新变宽", run: backspaceWidens),
         TestCase(name: "端到端.扫盘后size和path语法", run: sizeAndPathAfterScan),
@@ -224,6 +225,18 @@ enum ProductFlowTests {
         FileScanner(index: index, root: root, settings: settings, enableWatch: false, notifyOnMain: false).scanSynchronously()
         try expect(index.names(matching: "main.swift").isEmpty)
         try expectEqual(index.names(matching: "photo"), ["photo.jpg"])
+        try expectEqual(index.names(matching: "合同"), ["合同.pdf"])
+    }
+
+    private static func wechatChatFilesIncluded() throws {
+        let root = try FixtureHome.make()
+        try FixtureHome.addWeChatChatFiles(root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = FileIndex()
+        FileScanner(index: index, root: root, enableWatch: false, notifyOnMain: false).scanSynchronously()
+        try expect(index.names(matching: "花名册").contains("花名册.xlsx"))
+        try expect(index.names(matching: "半年报").contains("半年报.pdf"))
+        try expect(index.names(matching: "hash").isEmpty)
         try expectEqual(index.names(matching: "合同"), ["合同.pdf"])
     }
 

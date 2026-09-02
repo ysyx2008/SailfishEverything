@@ -10,6 +10,9 @@ enum IndexSettingsTests {
         TestCase(name: "单元.恢复默认排除", run: restoreDefaultExcludes),
         TestCase(name: "单元.额外根目录能搜到", run: extraRootIsIndexed),
         TestCase(name: "单元.家目录里的额外根不会扫两遍", run: extraRootInsideHomeIgnored),
+        TestCase(name: "单元.排除范围内的纳入能搜到", run: includeUnderExclude),
+        TestCase(name: "单元.默认纳入微信聊天文件", run: defaultWeChatInclude),
+        TestCase(name: "单元.去掉默认纳入后搜不到微信文件", run: disableWeChatInclude),
         TestCase(name: "单元.不存在的额外根不影响家目录", run: missingExtraRootOk),
         TestCase(name: "单元.旧设置没有额外根也能读", run: decodeLegacySettings),
         TestCase(name: "单元.打开记录记住最近的", run: runHistoryRemembers),
@@ -66,6 +69,8 @@ enum IndexSettingsTests {
         try expect(settings.extraExcludedRelatives.isEmpty)
         try expect(settings.displayExcludes().contains("Library/Caches"))
         try expect(settings.displayExcludes().contains("node_modules"))
+        try expect(settings.displayIncludes().contains(IndexSettings.wechatChatFilesInclude))
+        try expect(settings.disabledDefaultIncludes.isEmpty)
     }
 
     private static func extraRootIsIndexed() throws {
@@ -114,8 +119,71 @@ enum IndexSettingsTests {
         try expectEqual(settings.extraExcludedRelatives, ["foo"])
         try expect(settings.extraRoots.isEmpty)
         try expect(settings.preferOpened)
+        try expect(settings.disabledDefaultIncludes.isEmpty)
+        try expect(settings.displayIncludes().contains(IndexSettings.wechatChatFilesInclude))
         try expectEqual(IndexSettings.resolvedLookIn("/Volumes/USB", home: URL(fileURLWithPath: "/Users/me")), "/Volumes/USB")
         try expectEqual(IndexSettings.resolvedLookIn("", home: URL(fileURLWithPath: "/Users/me")), "")
+    }
+
+    private static func includeUnderExclude() throws {
+        let home = try FixtureHome.make()
+        try FixtureHome.addWeChatChatFiles(home)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let keep = home.appendingPathComponent("Library/Caches/keep").resolvingSymlinksInPath()
+        let settings = IndexSettings(
+            extraRoots: [keep.path],
+            disabledDefaultIncludes: [IndexSettings.wechatChatFilesInclude]
+        )
+        try expect(!settings.homeWalkCovers("Library/Caches/keep"))
+        try expect(settings.homeWalkCovers("Downloads"))
+        try expectEqual(settings.extraRootURLs(home: home).map(\.path), [keep.path])
+        let index = FileIndex()
+        FileScanner(index: index, root: home, settings: settings, enableWatch: false, notifyOnMain: false).scanSynchronously()
+        try expect(index.names(matching: "纳入的合同").contains("纳入的合同.pdf"))
+        try expect(index.names(matching: "secret").isEmpty)
+        try expect(index.names(matching: "photo").contains("photo.jpg"))
+    }
+
+    private static func defaultWeChatInclude() throws {
+        let home = try FixtureHome.make()
+        try FixtureHome.addWeChatChatFiles(home)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let index = FileIndex()
+        FileScanner(index: index, root: home, enableWatch: false, notifyOnMain: false).scanSynchronously()
+        try expect(index.names(matching: "花名册").contains("花名册.xlsx"))
+        try expect(index.names(matching: "半年报").contains("半年报.pdf"))
+        try expect(index.names(matching: "hash.mp4").isEmpty)
+        try expect(index.names(matching: "sns").isEmpty)
+        try expect(index.names(matching: "junk").isEmpty)
+        try expect(index.names(matching: "photo").contains("photo.jpg"))
+        try expectEqual(
+            IndexSettings.default.extraWalkTitle(
+                for: IndexSettings.wechatChatFileURLs(home: home)[0],
+                home: home
+            ),
+            L10n.t(.includeWeChatChatFiles)
+        )
+    }
+
+    private static func disableWeChatInclude() throws {
+        let home = try FixtureHome.make()
+        try FixtureHome.addWeChatChatFiles(home)
+        defer { try? FileManager.default.removeItem(at: home) }
+        var settings = IndexSettings.default
+        settings.disabledDefaultIncludes = [IndexSettings.wechatChatFilesInclude]
+        try expect(!settings.displayIncludes().contains(IndexSettings.wechatChatFilesInclude))
+        try expect(settings.extraRootURLs(home: home).isEmpty)
+        let index = FileIndex()
+        FileScanner(index: index, root: home, settings: settings, enableWatch: false, notifyOnMain: false).scanSynchronously()
+        try expect(index.names(matching: "花名册").isEmpty)
+        try expect(index.names(matching: "半年报").isEmpty)
+        try expect(index.names(matching: "photo").contains("photo.jpg"))
+        settings.enableDefaultInclude(IndexSettings.wechatChatFilesInclude)
+        try expect(settings.displayIncludes().contains(IndexSettings.wechatChatFilesInclude))
+        try expect(settings.missingDefaultIncludes.isEmpty)
+        let again = FileIndex()
+        FileScanner(index: again, root: home, settings: settings, enableWatch: false, notifyOnMain: false).scanSynchronously()
+        try expect(again.names(matching: "花名册").contains("花名册.xlsx"))
     }
 
     private static func includeCloudWhenUnexcluded() throws {

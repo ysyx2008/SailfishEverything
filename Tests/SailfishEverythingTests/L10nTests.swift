@@ -57,6 +57,7 @@ enum L10nTests {
         try expectEqual(L10n.filterMenu(.all), "全部")
         try expectEqual(L10n.folderPlace("Desktop"), "桌面")
         try expectEqual(L10n.excludeLabel("Library/Caches"), "资源库 / 缓存")
+        try expectEqual(L10n.includeLabel(IndexSettings.wechatChatFilesInclude), "微信聊天文件")
         try expect(!L10n.t(.aboutApp).contains("About Everything"))
     }
 

@@ -42,6 +42,20 @@ enum FixtureHome {
         return root
     }
 
+    static func addWeChatChatFiles(_ root: URL) throws {
+        func write(_ relative: String, _ body: String = "x") throws {
+            let url = root.appendingPathComponent(relative)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try body.data(using: .utf8)!.write(to: url)
+        }
+        try write("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/acct1/msg/file/2024-09/花名册.xlsx")
+        try write("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/acct2/msg/file/2024-10/半年报.pdf")
+        try write("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/acct1/msg/video/hash.mp4")
+        try write("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/acct1/cache/sns.jpg")
+        try write("Library/Containers/com.other.app/Data/junk.bin")
+        try write("Library/Caches/keep/纳入的合同.pdf")
+    }
+
     private static func writeBytes(_ root: URL, _ relative: String, count: Int) throws {
         let url = root.appendingPathComponent(relative)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
