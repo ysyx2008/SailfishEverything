@@ -493,15 +493,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         } else {
             bytes = 0
         }
-        var left = L10n.statusLine(objects: objects, selected: selected, bytes: bytes)
-        if isSearching {
-            left = L10n.t(.searching) + left
-        }
-        if isIndexing {
-            left = L10n.format(.indexing, indexingPhase)
-                + L10n.format(.indexedCount, ResultStats.formatCount(indexedCount))
-                + left
-        } else if options.regex, !Query.isValidRegex(query, matchCase: options.matchCase) {
+        var left = L10n.statusLeft(
+            objects: objects,
+            selected: selected,
+            bytes: bytes,
+            isSearching: isSearching,
+            indexingPhase: isIndexing ? indexingPhase : nil,
+            indexed: indexedCount
+        )
+        if !isIndexing, options.regex, !Query.isValidRegex(query, matchCase: options.matchCase) {
             left = L10n.t(.invalidRegex) + left
         }
         if !AppRuntime.isE2E, !isIndexing, !DiskAccess.isFullyTrusted(home: home) {

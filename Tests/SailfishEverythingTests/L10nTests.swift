@@ -8,6 +8,7 @@ enum L10nTests {
         TestCase(name: "单元.可强制中文", run: bootstrapOverride),
         TestCase(name: "单元.中英文案都齐", run: bothLanguagesFilled),
         TestCase(name: "单元.状态栏中英不同", run: statusLineLocalized),
+        TestCase(name: "单元.扫盘时收录数不跟同样的对象数", run: indexingStatusOmitsDuplicateCount),
     ]}
 
     private static func resolvePreferred() throws {
@@ -69,5 +70,44 @@ enum L10nTests {
         L10n.language = .chinese
         try expect(L10n.statusLine(objects: 3, selected: 0, bytes: 0).contains("个对象"))
         try expect(L10n.statusLine(objects: 12, selected: 2, bytes: 0).contains("已选"))
+    }
+
+    private static func indexingStatusOmitsDuplicateCount() throws {
+        let previous = L10n.language
+        defer { L10n.language = previous }
+        L10n.language = .chinese
+        let same = L10n.statusLeft(
+            objects: 100,
+            selected: 0,
+            bytes: 0,
+            isSearching: false,
+            indexingPhase: "个人文件夹",
+            indexed: 100
+        )
+        try expect(same.contains("已收录"))
+        try expect(same.contains("个对象"), same)
+        try expectEqual(same.components(separatedBy: ResultStats.formatCount(100)).count - 1, 1)
+        try expectEqual(same.components(separatedBy: "个对象").count - 1, 1)
+
+        let filtered = L10n.statusLeft(
+            objects: 12,
+            selected: 0,
+            bytes: 0,
+            isSearching: false,
+            indexingPhase: "个人文件夹",
+            indexed: 100
+        )
+        try expect(filtered.contains("已收录"))
+        try expect(filtered.contains("12 个对象"))
+
+        let done = L10n.statusLeft(
+            objects: 12,
+            selected: 0,
+            bytes: 0,
+            isSearching: false,
+            indexingPhase: nil,
+            indexed: 100
+        )
+        try expectEqual(done, "12 个对象")
     }
 }

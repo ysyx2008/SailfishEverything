@@ -66,6 +66,28 @@ public enum L10n {
         return text
     }
 
+    public static func statusLeft(
+        objects: Int,
+        selected: Int,
+        bytes: Int64,
+        isSearching: Bool,
+        indexingPhase: String?,
+        indexed: Int
+    ) -> String {
+        let listIsJustIndexed = selected == 0 && bytes == 0 && objects == indexed
+        var detail = ""
+        if indexingPhase == nil || !listIsJustIndexed {
+            detail = statusLine(objects: objects, selected: selected, bytes: bytes)
+        }
+        if isSearching {
+            detail = t(.searching) + detail
+        }
+        guard let phase = indexingPhase else { return detail }
+        let progress = format(.indexing, phase) + format(.indexedCount, ResultStats.formatCount(indexed))
+        if detail.isEmpty { return progress }
+        return progress + " · " + detail
+    }
+
     public static func filterMenu(_ filter: ResultFilter) -> String {
         switch filter {
         case .all: return t(.filterAll)
@@ -324,7 +346,7 @@ public enum L10n {
             .addBookmarkTitle: "Add Bookmark",
             .removeBookmark: "Remove Bookmark",
             .searchPlaceholder: "Type a filename",
-            .indexedCount: "%@ indexed · ",
+            .indexedCount: "%@ objects indexed",
             .options: "Options…",
             .rebuildIndex: "Rebuild Index",
             .fullDiskAccess: "Full Disk Access…",
@@ -481,7 +503,7 @@ public enum L10n {
             .addBookmarkTitle: "加入书签",
             .removeBookmark: "删除书签",
             .searchPlaceholder: "输入文件名",
-            .indexedCount: "已收录 %@ · ",
+            .indexedCount: "已收录 %@ 个对象",
             .options: "选项…",
             .rebuildIndex: "重建索引",
             .fullDiskAccess: "完全磁盘访问…",
