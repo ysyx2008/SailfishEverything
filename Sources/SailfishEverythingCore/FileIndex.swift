@@ -69,7 +69,7 @@ struct IndexFragment: Sendable {
 
 public final class FileIndex: @unchecked Sendable {
     private let lock = NSLock()
-    private var pathIndex: [String: Int] = [:]
+    private var pathIndex = PathLookup()
     private var identity: [Int] = []
     private var postings = NamePostings()
     private var namePack = NamePack()
@@ -146,6 +146,10 @@ public final class FileIndex: @unchecked Sendable {
     public func endBulkLoad() {
         lock.lock()
         bulkLoad = false
+        let total = origNamePack.count
+        if identity.count != total {
+            identity = Array(0..<total)
+        }
         lock.unlock()
     }
 
@@ -154,52 +158,13 @@ public final class FileIndex: @unchecked Sendable {
         let paths = origPathPack
         let expected = origNamePack.count
         lock.unlock()
-        let map = Self.makePathIndex(paths: paths, count: expected)
+        var lookup = PathLookup()
+        lookup.fill(from: paths)
         lock.lock()
         if origNamePack.count == expected {
-            pathIndex = map
+            pathIndex = lookup
         }
         lock.unlock()
-    }
-
-    private static func makePathIndex(paths: NamePack, count: Int) -> [String: Int] {
-        guard count > 0 else { return [:] }
-        if count < 32_768 {
-            return fillPathIndex(paths: paths, start: 0, end: count)
-        }
-        let workers = min(8, max(2, ProcessInfo.processInfo.activeProcessorCount))
-        let chunk = (count + workers - 1) / workers
-        let gather = NSLock()
-        var parts: [[String: Int]] = []
-        parts.reserveCapacity(workers)
-        DispatchQueue.concurrentPerform(iterations: workers) { worker in
-            let start = worker * chunk
-            let end = min(count, start + chunk)
-            guard start < end else { return }
-            let part = fillPathIndex(paths: paths, start: start, end: end)
-            gather.lock()
-            parts.append(part)
-            gather.unlock()
-        }
-        var map: [String: Int] = [:]
-        map.reserveCapacity(count)
-        for part in parts {
-            for (path, index) in part {
-                map[path] = index
-            }
-        }
-        return map
-    }
-
-    private static func fillPathIndex(paths: NamePack, start: Int, end: Int) -> [String: Int] {
-        var map: [String: Int] = [:]
-        map.reserveCapacity(end - start)
-        for index in start..<end {
-            if let path = paths.string(at: index) {
-                map[path] = index
-            }
-        }
-        return map
     }
 
     @discardableResult
@@ -243,8 +208,8 @@ public final class FileIndex: @unchecked Sendable {
             let index = origNamePack.count
             if !bulkLoad {
                 pathIndex[entry.path] = index
-                identity.append(index)
             }
+            identity.append(index)
             appendPacks(entry)
             if hasExtras(entry) {
                 writeExtras(index, entry)
@@ -295,13 +260,13 @@ public final class FileIndex: @unchecked Sendable {
             }
         }
         byteTotal += fragment.byteTotal
+        identity.reserveCapacity(identity.count + incoming)
+        identity.append(contentsOf: base..<(base + incoming))
         if !bulkLoad {
-            identity.reserveCapacity(identity.count + incoming)
             for index in 0..<incoming {
                 if let path = fragment.origPathPack.string(at: index) {
                     pathIndex[path] = base + index
                 }
-                identity.append(base + index)
             }
         }
         if postings.isReady {
@@ -342,16 +307,11 @@ public final class FileIndex: @unchecked Sendable {
         let expected = origNamePack.count
         let snapshot = origPathPack
         lock.unlock()
-        var map: [String: Int] = [:]
-        map.reserveCapacity(expected)
-        for index in 0..<snapshot.count {
-            if let path = snapshot.string(at: index) {
-                map[path] = index
-            }
-        }
+        var lookup = PathLookup()
+        lookup.fill(from: snapshot)
         lock.lock()
         if origNamePack.count == expected {
-            pathIndex = map
+            pathIndex = lookup
         } else {
             rebuildPathIndexLocked()
         }
@@ -367,11 +327,11 @@ public final class FileIndex: @unchecked Sendable {
         sort: SortState = SortState(),
         previous: SearchCursor? = nil,
         allowFullSort: Bool = true,
-        openedPaths: [String] = [],
+        openedCounts: [String: Int] = [:],
         shouldContinue: () -> Bool = { true }
     ) -> [Int] {
         func done(_ hits: [Int]) -> [Int] {
-            promoteOpened(hits, openedPaths: openedPaths)
+            promoteOpened(hits, openedCounts: openedCounts)
         }
         let parsed = Query.parse(query)
         let queryEmpty = parsed.isEmpty && !options.regex
@@ -551,29 +511,31 @@ public final class FileIndex: @unchecked Sendable {
         return done(finishPackedHits(hits, names: pack, paths: paths, sort: sort, allowFullSort: allowFullSort))
     }
 
-    private func promoteOpened(_ hits: [Int], openedPaths: [String]) -> [Int] {
-        guard !openedPaths.isEmpty, !hits.isEmpty else { return hits }
+    private func promoteOpened(_ hits: [Int], openedCounts: [String: Int]) -> [Int] {
+        guard !openedCounts.isEmpty, !hits.isEmpty else { return hits }
         lock.lock()
-        var resolved: [Int] = []
-        resolved.reserveCapacity(min(openedPaths.count, 64))
-        for path in openedPaths {
+        var wanted: [Int: Int] = [:]
+        wanted.reserveCapacity(min(openedCounts.count, 64))
+        for (path, count) in openedCounts where count > 0 {
             if let index = pathIndex[path] {
-                resolved.append(index)
+                wanted[index] = count
             }
         }
         lock.unlock()
-        guard !resolved.isEmpty else { return hits }
-        let wanted = Set(resolved)
-        var present = Set<Int>()
-        if resolved.count <= 64 {
-            for index in hits where wanted.contains(index) {
-                present.insert(index)
+        guard !wanted.isEmpty else { return hits }
+        var found: [(Int, Int, Int)] = []
+        found.reserveCapacity(min(wanted.count, 32))
+        for (order, index) in hits.enumerated() {
+            if let count = wanted[index] {
+                found.append((index, count, order))
             }
-        } else {
-            present = Set(hits).intersection(wanted)
         }
-        guard !present.isEmpty else { return hits }
-        let front = resolved.filter { present.contains($0) }
+        guard !found.isEmpty else { return hits }
+        found.sort { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.2 < rhs.2
+        }
+        let front = found.map(\.0)
         let drop = Set(front)
         var out: [Int] = []
         out.reserveCapacity(hits.count)
@@ -704,7 +666,7 @@ public final class FileIndex: @unchecked Sendable {
         filter: ResultFilter = .all,
         sort: SortState = SortState(),
         previous: SearchCursor? = nil,
-        openedPaths: [String] = []
+        openedCounts: [String: Int] = [:]
     ) -> [String] {
         entries(at: search(
             query: query,
@@ -712,7 +674,7 @@ public final class FileIndex: @unchecked Sendable {
             filter: filter,
             sort: sort,
             previous: previous,
-            openedPaths: openedPaths
+            openedCounts: openedCounts
         )).map(\.name)
     }
 
@@ -744,13 +706,7 @@ public final class FileIndex: @unchecked Sendable {
     }
 
     private func rebuildPathIndexLocked() {
-        pathIndex.removeAll(keepingCapacity: true)
-        pathIndex.reserveCapacity(origNamePack.count)
-        for index in 0..<origPathPack.count {
-            if let path = origPathPack.string(at: index) {
-                pathIndex[path] = index
-            }
-        }
+        pathIndex.fill(from: origPathPack)
     }
 
     private func makeEntryLocked(_ index: Int) -> FileEntry? {
@@ -888,9 +844,9 @@ public final class FileIndex: @unchecked Sendable {
         for (index, entry) in rows.enumerated() {
             appendPacks(entry)
             writeExtras(index, entry)
+            identity.append(index)
             if !bulkLoad {
                 pathIndex[entry.path] = index
-                identity.append(index)
             }
         }
     }
@@ -1543,5 +1499,132 @@ struct DirBits: Sendable {
     func isDirectory(_ index: Int) -> Bool {
         guard index >= 0, index < count else { return false }
         return words[index / 64] & (1 << (index % 64)) != 0
+    }
+}
+
+/// Maps a full path to its row without allocating a String per file.
+/// Unique hashes stay as integers; only rare collisions keep a path string.
+struct PathLookup {
+    private var unique: [UInt64: Int] = [:]
+    private var clashes: [String: Int] = [:]
+    private var clashHashes: Set<UInt64> = []
+
+    mutating func removeAll(keepingCapacity: Bool) {
+        unique.removeAll(keepingCapacity: keepingCapacity)
+        clashes.removeAll(keepingCapacity: keepingCapacity)
+        clashHashes.removeAll(keepingCapacity: keepingCapacity)
+    }
+
+    mutating func reserveCapacity(_ minimumCapacity: Int) {
+        unique.reserveCapacity(minimumCapacity)
+    }
+
+    subscript(path: String) -> Int? {
+        get { lookup(path) }
+        set {
+            if let value = newValue {
+                insert(path, at: value)
+            }
+        }
+    }
+
+    mutating func fill(from paths: NamePack) {
+        removeAll(keepingCapacity: true)
+        let total = paths.count
+        guard total > 0 else { return }
+        reserveCapacity(total)
+        let offsets = paths.offsets
+        paths.bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            var index = 0
+            while index < total {
+                let start = offsets[index]
+                let length = offsets[index + 1] - start - 1
+                if length >= 0 {
+                    insert(base + start, count: length, index: index, paths: paths, base: base)
+                }
+                index += 1
+            }
+        }
+    }
+
+    private mutating func insert(
+        _ bytes: UnsafePointer<UInt8>,
+        count: Int,
+        index: Int,
+        paths: NamePack,
+        base: UnsafePointer<UInt8>
+    ) {
+        let hash = Self.hash(bytes, count: count)
+        if clashHashes.contains(hash) {
+            clashes[Self.decode(bytes, count: count)] = index
+            return
+        }
+        if let existing = unique[hash] {
+            clashHashes.insert(hash)
+            unique[hash] = nil
+            let oldStart = paths.offsets[existing]
+            let oldLen = paths.offsets[existing + 1] - oldStart - 1
+            if oldLen >= 0 {
+                clashes[Self.decode(base + oldStart, count: oldLen)] = existing
+            }
+            clashes[Self.decode(bytes, count: count)] = index
+            return
+        }
+        unique[hash] = index
+    }
+
+    private func lookup(_ path: String) -> Int? {
+        let hash = Self.hash(path)
+        if clashHashes.contains(hash) {
+            if let hit = clashes[path] { return hit }
+            return unique[hash]
+        }
+        return unique[hash]
+    }
+
+    private mutating func insert(_ path: String, at index: Int) {
+        let hash = Self.hash(path)
+        if clashHashes.contains(hash) {
+            clashes[path] = index
+            return
+        }
+        if let existing = unique[hash], existing != index {
+            clashHashes.insert(hash)
+            clashes[path] = index
+            return
+        }
+        unique[hash] = index
+    }
+
+    private static func hash(_ ptr: UnsafePointer<UInt8>, count: Int) -> UInt64 {
+        var hash: UInt64 = 1_469_598_103_934_665_6037
+        var offset = 0
+        let stride = MemoryLayout<UInt64>.size
+        while offset + stride <= count {
+            var word: UInt64 = 0
+            memcpy(&word, ptr + offset, stride)
+            hash ^= word
+            hash &*= 1_099_511_628_211
+            offset += stride
+        }
+        while offset < count {
+            hash ^= UInt64(ptr[offset])
+            hash &*= 1_099_511_628_211
+            offset += 1
+        }
+        return hash
+    }
+
+    private static func hash(_ path: String) -> UInt64 {
+        var copy = path
+        return copy.withUTF8 { buf in
+            guard let ptr = buf.baseAddress else { return 0 }
+            return hash(ptr, count: buf.count)
+        }
+    }
+
+    private static func decode(_ ptr: UnsafePointer<UInt8>, count: Int) -> String {
+        String(decoding: UnsafeBufferPointer(start: ptr, count: count), as: UTF8.self)
     }
 }

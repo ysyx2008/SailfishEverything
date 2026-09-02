@@ -94,16 +94,20 @@ enum IndexRegressionTests {
         ])
         try expectEqual(index.names(matching: "txt"), ["aaa.txt", "mmm.txt", "zzz.txt"])
         try expectEqual(
-            index.names(matching: "txt", openedPaths: ["/a/zzz.txt"]),
+            index.names(matching: "txt", openedCounts: ["/a/zzz.txt": 1]),
             ["zzz.txt", "aaa.txt", "mmm.txt"]
         )
         try expectEqual(
-            index.names(matching: "txt", openedPaths: ["/a/mmm.txt", "/a/zzz.txt"]),
-            ["mmm.txt", "zzz.txt", "aaa.txt"]
+            index.names(matching: "txt", openedCounts: ["/a/zzz.txt": 3, "/a/mmm.txt": 1]),
+            ["zzz.txt", "mmm.txt", "aaa.txt"]
         )
         try expectEqual(
-            index.names(matching: "txt", openedPaths: ["/no/such.txt", "/a/aaa.txt"]),
+            index.names(matching: "txt", openedCounts: ["/no/such.txt": 9, "/a/aaa.txt": 1]),
             ["aaa.txt", "mmm.txt", "zzz.txt"]
+        )
+        try expectEqual(
+            index.names(matching: "txt", openedCounts: ["/a/zzz.txt": 2, "/a/aaa.txt": 2]),
+            ["aaa.txt", "zzz.txt", "mmm.txt"]
         )
     }
 

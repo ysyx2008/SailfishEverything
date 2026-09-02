@@ -117,8 +117,23 @@ enum FastWalk {
                 return
             }
             if isDir {
+                FileIndex.append(
+                    directory: path,
+                    nameUTF8: nameBytes,
+                    isDirectory: true,
+                    size: size,
+                    modified: modified,
+                    created: created,
+                    into: &fragment
+                )
+                if fragment.origNamePack.count >= 8192 { flush() }
                 let name = String(decoding: nameBytes, as: UTF8.self)
-                takeName(name, isDir: true, modified: modified, created: created)
+                let childRelative = relative.isEmpty ? name : relative + "/" + name
+                let skipDown = policy.shouldSkipDescending(relative: childRelative, name: name)
+                    || isPackageName(name)
+                if !skipDown {
+                    subdirs.append((path + "/" + name, childRelative, name))
+                }
                 return
             }
             FileIndex.append(

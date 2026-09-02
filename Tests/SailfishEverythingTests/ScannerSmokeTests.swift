@@ -33,6 +33,7 @@ enum ScannerSmokeTests {
         TestCase(name: "冒烟.扫出来的路径能打开", run: scannedPathJoinsAndExists),
         TestCase(name: "冒烟.真实家目录扫盘与首字", run: realHomeScanIfEnabled),
         TestCase(name: "冒烟.收尾建路径表时也能搜", run: searchWhileBuildingPathIndex),
+        TestCase(name: "冒烟.大批量路径更新也要快", run: pathIndexLargeReplace),
         TestCase(name: "冒烟.区分大小写大批量也要快", run: matchCaseLargeIndex),
     ]}
 
@@ -767,6 +768,50 @@ enum ScannerSmokeTests {
         index.add([FileEntry(name: "notes.txt", directory: "/tmp", size: 4)], replace: true)
         try expectEqual(index.count, 80_002)
         try expectEqual(index.names(matching: "notes"), ["notes.txt"])
+    }
+
+    private static func pathIndexLargeReplace() throws {
+        let index = FileIndex()
+        index.beginBulkLoad()
+        var batch: [FileEntry] = []
+        let total = 200_000
+        batch.reserveCapacity(total + 2)
+        for i in 0..<total {
+            batch.append(FileEntry(name: String(format: "f-%06d.txt", i), directory: "/pool/\(i % 200)"))
+        }
+        batch.append(FileEntry(name: "合同.pdf", directory: "/公司文件"))
+        batch.append(FileEntry(name: "notes.txt", directory: "/tmp"))
+        index.add(batch)
+        index.endBulkLoad()
+        try expectEqual(index.search(query: "").count, total + 2)
+
+        let started = DispatchTime.now()
+        index.buildPathIndex()
+        let pathMs = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
+        bench("path index 200k", pathMs)
+        try expect(pathMs < 250, "path index 200k took \(pathMs)ms")
+
+        let target = FileEntry(name: "f-000042.txt", directory: "/pool/42", size: 99)
+        index.add([target], replace: true)
+        try expectEqual(index.count, total + 2)
+        let updated = index.entries(at: index.search(query: "f-000042"))
+        try expectEqual(updated.count, 1)
+        try expectEqual(updated[0].size, 99)
+
+        let chinese = FileEntry(name: "合同.pdf", directory: "/公司文件", size: 8)
+        index.add([chinese], replace: true)
+        try expectEqual(index.entries(at: index.search(query: "合同")).first?.size, 8)
+
+        let openedPath = "/pool/42/f-000042.txt"
+        let promoted = index.search(query: "f-00004", openedCounts: [openedPath: 5])
+        try expectEqual(index.entries(at: [promoted[0]]).first?.path, openedPath)
+
+        index.remove(paths: ["/tmp/notes.txt"])
+        try expectEqual(index.count, total + 1)
+        try expect(index.names(matching: "notes").isEmpty)
+        try expectEqual(index.names(matching: "合同"), ["合同.pdf"])
+        index.add([FileEntry(name: "fresh.txt", directory: "/tmp")], replace: true)
+        try expectEqual(index.names(matching: "fresh"), ["fresh.txt"])
     }
 
     private static func matchCaseLargeIndex() throws {

@@ -126,9 +126,17 @@ struct NamePack: Sendable {
             writeRaw(raw.fastLowercased())
             return
         }
-        bytes.reserveCapacity(bytes.count + buf.count + 1)
-        for byte in buf {
-            bytes.append(byte >= 65 && byte <= 90 ? byte + 32 : byte)
+        let start = bytes.count
+        bytes.append(contentsOf: buf)
+        bytes.withUnsafeMutableBufferPointer { dest in
+            var i = start
+            while i < dest.count {
+                let byte = dest[i]
+                if byte >= 65 && byte <= 90 {
+                    dest[i] = byte + 32
+                }
+                i += 1
+            }
         }
     }
 
@@ -288,7 +296,9 @@ struct NamePack: Sendable {
             return scanContainsWholeWord(candidates, needle: needleBytes)
         }
         if mode == .contains, candidates == nil {
-            return scanBlob(needle: needleBytes)
+            return needleBytes.count == 1
+                ? scanBlobByte(needleBytes[0])
+                : scanBlob(needle: needleBytes)
         }
         return scanAffix(candidates, needle: needleBytes, mode: mode)
     }
@@ -342,6 +352,31 @@ struct NamePack: Sendable {
         return hits
     }
 
+    private func scanBlobByte(_ byte: UInt8) -> [Int] {
+        guard !bytes.isEmpty, count > 0 else { return [] }
+        var hits: [Int] = []
+        hits.reserveCapacity(max(count / 2, 64))
+        bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            var cursor = UnsafeRawPointer(base)
+            let end = UnsafeRawPointer(base + buf.count)
+            var index = 0
+            while cursor < end {
+                let remaining = end - cursor
+                guard let raw = memchr(cursor, Int32(byte), remaining) else { return }
+                let offset = UnsafeRawPointer(raw) - UnsafeRawPointer(base)
+                while index + 1 < offsets.count, offsets[index + 1] <= offset {
+                    index += 1
+                }
+                hits.append(index)
+                if index + 1 >= offsets.count { return }
+                cursor = UnsafeRawPointer(base + offsets[index + 1])
+                index += 1
+            }
+        }
+        return hits
+    }
+
     private enum Affix {
         case contains, prefix, suffix, exact
     }
@@ -349,14 +384,13 @@ struct NamePack: Sendable {
     private func scanAffix(_ candidates: [Int]?, needle: [UInt8], mode: Affix) -> [Int] {
         let n = needle.count
         var hits: [Int] = []
-        let pool = candidates ?? Array(0..<count)
-        hits.reserveCapacity(min(pool.count, 64))
+        hits.reserveCapacity(min(candidates?.count ?? count, 64))
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
             needle.withUnsafeBufferPointer { need in
                 guard let needBase = need.baseAddress else { return }
-                for index in pool {
-                    guard index >= 0, index < count else { continue }
+                func consider(_ index: Int) {
+                    guard index >= 0, index < count else { return }
                     let start = offsets[index]
                     let nameLen = offsets[index + 1] - start - 1
                     let matched: Bool
@@ -372,6 +406,11 @@ struct NamePack: Sendable {
                     }
                     if matched { hits.append(index) }
                 }
+                if let candidates {
+                    for index in candidates { consider(index) }
+                } else {
+                    for index in 0..<count { consider(index) }
+                }
             }
         }
         return hits
@@ -384,20 +423,24 @@ struct NamePack: Sendable {
         let folderBytes = Array(folderLower.utf8)
         let prefixBytes = Array(childPrefix.utf8)
         var hits: [Int] = []
-        let pool = candidates ?? Array(0..<count)
-        hits.reserveCapacity(min(pool.count, 64))
+        hits.reserveCapacity(min(candidates?.count ?? count, 64))
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
             folderBytes.withUnsafeBufferPointer { folderBuf in
                 prefixBytes.withUnsafeBufferPointer { prefixBuf in
                     guard let folderPtr = folderBuf.baseAddress, let prefixPtr = prefixBuf.baseAddress else { return }
-                    for index in pool {
-                        guard index >= 0, index < count else { continue }
+                    func consider(_ index: Int) {
+                        guard index >= 0, index < count else { return }
                         let start = offsets[index]
                         let nameLen = offsets[index + 1] - start - 1
                         let isSelf = nameLen == folderBuf.count && memcmp(base + start, folderPtr, folderBuf.count) == 0
                         let isChild = nameLen >= prefixBuf.count && memcmp(base + start, prefixPtr, prefixBuf.count) == 0
                         if isSelf || isChild { hits.append(index) }
+                    }
+                    if let candidates {
+                        for index in candidates { consider(index) }
+                    } else {
+                        for index in 0..<count { consider(index) }
                     }
                 }
             }
@@ -409,14 +452,13 @@ struct NamePack: Sendable {
         let needleBytes = Array((matchCase ? needle : needle.fastLowercased()).utf8)
         guard !needleBytes.isEmpty else { return [] }
         var hits: [Int] = []
-        let pool = candidates ?? Array(0..<count)
-        hits.reserveCapacity(min(pool.count, 64))
+        hits.reserveCapacity(min(candidates?.count ?? count, 64))
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
             needleBytes.withUnsafeBufferPointer { need in
                 guard let needPtr = need.baseAddress else { return }
-                for index in pool {
-                    guard index >= 0, index < count else { continue }
+                forEachIndex(candidates) { index in
+                    guard index >= 0, index < count else { return }
                     let start = offsets[index]
                     let end = offsets[index + 1] - 1
                     var lastSlash = -1
@@ -429,10 +471,10 @@ struct NamePack: Sendable {
                         }
                         i += 1
                     }
-                    guard lastSlash >= start else { continue }
+                    guard lastSlash >= start else { return }
                     let parentStart = prevSlash >= start ? prevSlash + 1 : start
                     let parentLen = lastSlash - parentStart
-                    guard need.count <= parentLen else { continue }
+                    guard need.count <= parentLen else { return }
                     if wholeWord {
                         if Self.containsWholeWord(
                             base: base,
@@ -460,13 +502,12 @@ struct NamePack: Sendable {
         if pool == nil, let literal = Self.longestLiteral(patBytes), literal.count >= 2 {
             pool = scanBlob(needle: literal)
         }
-        let names = pool ?? Array(0..<count)
         var hits: [Int] = []
-        hits.reserveCapacity(min(names.count, 64))
+        hits.reserveCapacity(min(pool?.count ?? count, 64))
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
-            for index in names {
-                guard index >= 0, index < count else { continue }
+            forEachIndex(pool) { index in
+                guard index >= 0, index < count else { return }
                 let start = offsets[index]
                 let end = offsets[index + 1] - 1
                 var lastSlash = -1
@@ -479,7 +520,7 @@ struct NamePack: Sendable {
                     }
                     i += 1
                 }
-                guard lastSlash >= start else { continue }
+                guard lastSlash >= start else { return }
                 let parentStart = prevSlash >= start ? prevSlash + 1 : start
                 let parentLen = lastSlash - parentStart
                 if patASCII, Self.nameIsASCII(base: base, start: parentStart, nameLen: parentLen) {
@@ -501,20 +542,38 @@ struct NamePack: Sendable {
     }
 
     func scanRegex(_ regex: NSRegularExpression, candidates: [Int]?) -> [Int] {
-        let pool = candidates ?? Array(0..<count)
-        guard !pool.isEmpty else { return [] }
-        if pool.count < 4_096 {
-            return scanRegexSerial(regex, pool: pool)
+        if let candidates {
+            guard !candidates.isEmpty else { return [] }
+            if candidates.count < 4_096 {
+                return scanRegexSerial(regex, pool: candidates)
+            }
+            return scanRegexParallel(regex, count: candidates.count) { start, end in
+                scanRegexSerial(regex, pool: candidates, start: start, end: end)
+            }
         }
+        guard count > 0 else { return [] }
+        if count < 4_096 {
+            return scanRegexSerial(regex, start: 0, end: count)
+        }
+        return scanRegexParallel(regex, count: count) { start, end in
+            scanRegexSerial(regex, start: start, end: end)
+        }
+    }
+
+    private func scanRegexParallel(
+        _ regex: NSRegularExpression,
+        count total: Int,
+        slice: (Int, Int) -> [Int]
+    ) -> [Int] {
         let workers = min(8, max(2, ProcessInfo.processInfo.activeProcessorCount))
-        let chunk = (pool.count + workers - 1) / workers
-        let gather = NSLock()
+        let chunk = (total + workers - 1) / workers
         var parts = Array(repeating: [Int](), count: workers)
+        let gather = NSLock()
         DispatchQueue.concurrentPerform(iterations: workers) { worker in
             let start = worker * chunk
-            let end = min(pool.count, start + chunk)
+            let end = min(total, start + chunk)
             guard start < end else { return }
-            let part = scanRegexSerial(regex, pool: Array(pool[start..<end]))
+            let part = slice(start, end)
             gather.lock()
             parts[worker] = part
             gather.unlock()
@@ -528,16 +587,64 @@ struct NamePack: Sendable {
     }
 
     private func scanRegexSerial(_ regex: NSRegularExpression, pool: [Int]) -> [Int] {
+        scanRegexSerial(regex, pool: pool, start: 0, end: pool.count)
+    }
+
+    private func scanRegexSerial(_ regex: NSRegularExpression, pool: [Int], start: Int, end: Int) -> [Int] {
         var hits: [Int] = []
-        hits.reserveCapacity(min(pool.count, 64))
-        for index in pool {
-            guard let text = string(at: index) else { continue }
-            let range = NSRange(text.startIndex..., in: text)
-            if regex.firstMatch(in: text, options: [], range: range) != nil {
-                hits.append(index)
+        hits.reserveCapacity(end - start)
+        bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            var i = start
+            while i < end {
+                let index = pool[i]
+                if regexMatches(regex, base: base, index: index) {
+                    hits.append(index)
+                }
+                i += 1
             }
         }
         return hits
+    }
+
+    private func scanRegexSerial(_ regex: NSRegularExpression, start: Int, end: Int) -> [Int] {
+        var hits: [Int] = []
+        hits.reserveCapacity(end - start)
+        bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            var index = start
+            while index < end {
+                if regexMatches(regex, base: base, index: index) {
+                    hits.append(index)
+                }
+                index += 1
+            }
+        }
+        return hits
+    }
+
+    private func regexMatches(_ regex: NSRegularExpression, base: UnsafePointer<UInt8>, index: Int) -> Bool {
+        guard index >= 0, index < count else { return false }
+        let start = offsets[index]
+        let nameLen = offsets[index + 1] - start - 1
+        guard nameLen >= 0 else { return false }
+        if nameLen == 0 {
+            return regex.firstMatch(in: "", options: [], range: NSRange(location: 0, length: 0)) != nil
+        }
+        let pointer = UnsafeMutableRawPointer(mutating: base + start)
+        guard let ns = NSString(
+            bytesNoCopy: pointer,
+            length: nameLen,
+            encoding: String.Encoding.utf8.rawValue,
+            freeWhenDone: false
+        ) else {
+            return false
+        }
+        return regex.firstMatch(
+            in: ns as String,
+            options: [],
+            range: NSRange(location: 0, length: ns.length)
+        ) != nil
     }
 
     private func scanBlobWholeWord(needle: [UInt8]) -> [Int] {
@@ -581,15 +688,14 @@ struct NamePack: Sendable {
     }
 
     private func scanContainsWholeWord(_ candidates: [Int]?, needle: [UInt8]) -> [Int] {
-        let pool = candidates ?? Array(0..<count)
         var hits: [Int] = []
-        hits.reserveCapacity(min(pool.count, 64))
+        hits.reserveCapacity(min(candidates?.count ?? count, 64))
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
             needle.withUnsafeBufferPointer { need in
                 guard let needBase = need.baseAddress else { return }
-                for index in pool {
-                    guard index >= 0, index < count else { continue }
+                forEachIndex(candidates) { index in
+                    guard index >= 0, index < count else { return }
                     let start = offsets[index]
                     let nameEnd = offsets[index + 1] - 1
                     if Self.containsWholeWord(
@@ -616,12 +722,11 @@ struct NamePack: Sendable {
         if pool == nil, let literal = Self.longestLiteral(patBytes), literal.count >= 2 {
             pool = scanBlob(needle: literal)
         }
-        let names = pool ?? Array(0..<count)
-        hits.reserveCapacity(min(names.count, 64))
+        hits.reserveCapacity(min(pool?.count ?? count, 64))
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
-            for index in names {
-                guard index >= 0, index < count else { continue }
+            forEachIndex(pool) { index in
+                guard index >= 0, index < count else { return }
                 let start = offsets[index]
                 let nameLen = offsets[index + 1] - start - 1
                 if patASCII, Self.nameIsASCII(base: base, start: start, nameLen: nameLen) {
@@ -706,12 +811,11 @@ struct NamePack: Sendable {
         if pool == nil, let literal = Self.longestLiteral(patBytes), literal.count >= 2 {
             pool = scanBlob(needle: literal)
         }
-        let names = pool ?? Array(0..<count)
-        hits.reserveCapacity(min(names.count, 64))
+        hits.reserveCapacity(min(pool?.count ?? count, 64))
         bytes.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
-            for index in names {
-                guard index >= 0, index < count else { continue }
+            forEachIndex(pool) { index in
+                guard index >= 0, index < count else { return }
                 let start = offsets[index]
                 let nameLen = offsets[index + 1] - start - 1
                 var nameASCII = true
@@ -724,7 +828,7 @@ struct NamePack: Sendable {
                     i += 1
                 }
                 if patASCII && nameASCII {
-                    guard nameLen == patBytes.count else { continue }
+                    guard nameLen == patBytes.count else { return }
                     var ok = true
                     var j = 0
                     while j < nameLen {
@@ -748,6 +852,20 @@ struct NamePack: Sendable {
             }
         }
         return hits
+    }
+
+    private func forEachIndex(_ candidates: [Int]?, _ body: (Int) -> Void) {
+        if let candidates {
+            for index in candidates {
+                body(index)
+            }
+            return
+        }
+        var index = 0
+        while index < count {
+            body(index)
+            index += 1
+        }
     }
 
     private func scanNameLength(_ pred: SizeCompare, candidates: [Int]?) -> [Int] {

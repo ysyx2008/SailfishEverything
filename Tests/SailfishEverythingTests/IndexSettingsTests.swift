@@ -149,8 +149,14 @@ enum IndexSettingsTests {
         try expect(RunHistoryStore.load(defaults: defaults).isEmpty)
         RunHistoryStore.record("/a/zzz.txt", defaults: defaults)
         RunHistoryStore.record("/a/aaa.txt", defaults: defaults)
-        try expectEqual(RunHistoryStore.load(defaults: defaults), ["/a/aaa.txt", "/a/zzz.txt"])
+        try expectEqual(RunHistoryStore.load(defaults: defaults), ["/a/zzz.txt": 1, "/a/aaa.txt": 1])
         RunHistoryStore.record("/a/zzz.txt", defaults: defaults)
-        try expectEqual(RunHistoryStore.load(defaults: defaults), ["/a/zzz.txt", "/a/aaa.txt"])
+        try expectEqual(RunHistoryStore.load(defaults: defaults), ["/a/zzz.txt": 2, "/a/aaa.txt": 1])
+
+        let legacy = "sailfish.run.legacy.\(UUID().uuidString)"
+        let old = UserDefaults(suiteName: legacy)!
+        defer { old.removePersistentDomain(forName: legacy) }
+        old.set(["/b/one.txt", "/b/two.txt"], forKey: "runHistory")
+        try expectEqual(RunHistoryStore.load(defaults: old), ["/b/one.txt": 1, "/b/two.txt": 1])
     }
 }
