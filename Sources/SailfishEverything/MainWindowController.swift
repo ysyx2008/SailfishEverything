@@ -70,6 +70,9 @@ final class ResultsTableView: NSTableView {
     var onFocusSearch: (() -> Void)?
     var onPreview: (() -> Void)?
 
+    private var clickToggleRow: Int?
+    private var clickToggleOrigin: NSPoint?
+
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 126 where selectedRow <= 0:
@@ -81,12 +84,53 @@ final class ResultsTableView: NSTableView {
                 onOpen?()
             }
         case 53:
-            onFocusSearch?()
+            cancelOperation(nil)
         case 49:
             onPreview?()
         default:
             super.keyDown(with: event)
         }
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if selectedRowIndexes.isEmpty {
+            onFocusSearch?()
+        } else {
+            deselectAll(nil)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount >= 2 {
+            clickToggleRow = nil
+            clickToggleOrigin = nil
+            super.mouseDown(with: event)
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if row >= 0, modifiers.isEmpty, selectedRowIndexes == IndexSet(integer: row) {
+            clickToggleRow = row
+            clickToggleOrigin = point
+        } else {
+            clickToggleRow = nil
+            clickToggleOrigin = nil
+        }
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        let row = clickToggleRow
+        let origin = clickToggleOrigin
+        clickToggleRow = nil
+        clickToggleOrigin = nil
+        guard event.clickCount < 2, let row, let origin else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let dragged = hypot(point.x - origin.x, point.y - origin.y) > 4
+        guard !dragged, self.row(at: point) == row, selectedRowIndexes == IndexSet(integer: row) else { return }
+        deselectRow(row)
     }
 }
 
