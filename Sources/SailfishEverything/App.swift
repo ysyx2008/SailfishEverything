@@ -105,14 +105,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func menuBarIcon() -> NSImage? {
-        let source = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage
-        guard let source else { return nil }
-        let icon = NSImage(size: NSSize(width: 18, height: 18))
-        icon.lockFocus()
-        source.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18), from: .zero, operation: .copy, fraction: 1)
-        icon.unlockFocus()
-        icon.isTemplate = true
-        return icon
+        let symbol = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L10n.productName)
+        let configured = symbol?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .medium, scale: .medium)
+        )
+        guard let configured else { return nil }
+        configured.isTemplate = true
+        return configured
     }
 
     private func statusMenu() -> NSMenu {

@@ -416,6 +416,32 @@ struct NamePack: Sendable {
         return hits
     }
 
+    func paths(under folder: String) -> [String] {
+        let prefix = folder.hasSuffix("/") ? folder : folder + "/"
+        let folderBytes = Array(folder.utf8)
+        let prefixBytes = Array(prefix.utf8)
+        var hits: [String] = []
+        bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            folderBytes.withUnsafeBufferPointer { folderBuf in
+                prefixBytes.withUnsafeBufferPointer { prefixBuf in
+                    guard let folderPtr = folderBuf.baseAddress, let prefixPtr = prefixBuf.baseAddress else { return }
+                    for index in 0..<count {
+                        let start = offsets[index]
+                        let length = offsets[index + 1] - start - 1
+                        guard length >= 0 else { continue }
+                        let isSelf = length == folderBuf.count && memcmp(base + start, folderPtr, folderBuf.count) == 0
+                        let isChild = length >= prefixBuf.count && memcmp(base + start, prefixPtr, prefixBuf.count) == 0
+                        if isSelf || isChild, let path = string(at: index) {
+                            hits.append(path)
+                        }
+                    }
+                }
+            }
+        }
+        return hits
+    }
+
     func inFolder(_ folder: String, candidates: [Int]? = nil) -> [Int] {
         let folderLower = folder.fastLowercased()
         guard !folderLower.isEmpty else { return candidates ?? Array(0..<count) }

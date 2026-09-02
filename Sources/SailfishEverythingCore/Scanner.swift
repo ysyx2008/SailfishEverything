@@ -437,6 +437,7 @@ public final class FileScanner: @unchecked Sendable {
             }
         }
 
+        let watchStart = DispatchTime.now()
         if !removed.isEmpty {
             FileMetadata.invalidate(paths: removed)
             index.remove(paths: removed)
@@ -449,6 +450,13 @@ public final class FileScanner: @unchecked Sendable {
             total = index.add(added, replace: true)
         } else {
             total = index.count
+        }
+        let watchMs = DiagnosticLog.elapsedMilliseconds(since: watchStart)
+        if watchMs >= 50 {
+            DiagnosticLog.shared.event(
+                "scan",
+                "watch \(DiagnosticLog.formatDuration(watchMs)) added=\(added.count) removed=\(removed.count)"
+            )
         }
         notify { delegate in
             delegate.scanner(self, didAdd: added, total: total)

@@ -170,7 +170,6 @@ public final class FileIndex: @unchecked Sendable {
     @discardableResult
     public func add(_ batch: [FileEntry], replace: Bool = false) -> Int {
         lock.lock()
-        defer { lock.unlock() }
         identity.reserveCapacity(identity.count + batch.count)
         let room = origNamePack.count + batch.count
         namePack.reserve(room)
@@ -222,11 +221,20 @@ public final class FileIndex: @unchecked Sendable {
             }
             changed = true
         }
-        if !replacements.isEmpty {
-            applyReplacementsLocked(replacements)
+        if replacements.isEmpty {
+            if changed { sortedAll = nil }
+            let total = origNamePack.count
+            lock.unlock()
+            return total
         }
-        if changed { sortedAll = nil }
-        return origNamePack.count
+        let snap = snapshotColumnsLocked()
+        lock.unlock()
+        var rows = Self.materialize(snap)
+        for (index, entry) in replacements {
+            guard index >= 0, index < rows.count else { continue }
+            rows[index] = entry
+        }
+        return installRows(rows)
     }
 
     func add(_ fragment: IndexFragment) -> Int {
@@ -278,46 +286,20 @@ public final class FileIndex: @unchecked Sendable {
 
     public func paths(under folder: String) -> [String] {
         lock.lock()
-        defer { lock.unlock() }
-        let prefix = folder.hasSuffix("/") ? folder : folder + "/"
-        var hits: [String] = []
-        for index in 0..<origPathPack.count {
-            guard let path = origPathPack.string(at: index) else { continue }
-            if path == folder || path.hasPrefix(prefix) {
-                hits.append(path)
-            }
-        }
-        return hits
+        let pack = origPathPack
+        lock.unlock()
+        return pack.paths(under: folder)
     }
 
     public func remove(paths: [String]) {
         guard !paths.isEmpty else { return }
         lock.lock()
+        let snap = snapshotColumnsLocked()
+        lock.unlock()
         let doomed = Set(paths)
-        let kept = allEntriesLocked().filter { entry in
-            if doomed.contains(entry.path) {
-                if !entry.isDirectory {
-                    byteTotal -= entry.size ?? 0
-                }
-                return false
-            }
-            return true
-        }
-        rewriteRowsLocked(kept)
-        let expected = origNamePack.count
-        let snapshot = origPathPack
-        lock.unlock()
-        var lookup = PathLookup()
-        lookup.fill(from: snapshot)
-        lock.lock()
-        if origNamePack.count == expected {
-            pathIndex = lookup
-        } else {
-            rebuildPathIndexLocked()
-        }
-        postings.markDirty()
-        sortedAll = nil
-        lock.unlock()
+        let kept = Self.materialize(snap).filter { !doomed.contains($0.path) }
+        guard kept.count != snap.total else { return }
+        installRows(kept)
     }
 
     public func search(
@@ -705,16 +687,77 @@ public final class FileIndex: @unchecked Sendable {
         return entry.path.hasPrefix(prefix)
     }
 
-    private func rebuildPathIndexLocked() {
-        pathIndex.fill(from: origPathPack)
-    }
-
     private func makeEntryLocked(_ index: Int) -> FileEntry? {
         Self.makeEntry(index, names: origNamePack, paths: origPathPack, dirs: dirBits, extras: extras, sizes: sizes, modifieds: modifieds, createds: createds)
     }
 
-    private func allEntriesLocked() -> [FileEntry] {
-        (0..<origNamePack.count).compactMap { makeEntryLocked($0) }
+    private struct ColumnSnap {
+        var names: NamePack
+        var paths: NamePack
+        var bits: DirBits
+        var extras: [Int: FileRowExtras]
+        var sizes: [Int64]
+        var modifieds: [Int64]
+        var createds: [Int64]
+        var total: Int
+    }
+
+    private func snapshotColumnsLocked() -> ColumnSnap {
+        ColumnSnap(
+            names: origNamePack,
+            paths: origPathPack,
+            bits: dirBits,
+            extras: extras,
+            sizes: sizes,
+            modifieds: modifieds,
+            createds: createds,
+            total: origNamePack.count
+        )
+    }
+
+    private static func materialize(_ snap: ColumnSnap) -> [FileEntry] {
+        var rows: [FileEntry] = []
+        rows.reserveCapacity(snap.total)
+        for index in 0..<snap.total {
+            if let entry = makeEntry(
+                index,
+                names: snap.names,
+                paths: snap.paths,
+                dirs: snap.bits,
+                extras: snap.extras,
+                sizes: snap.sizes,
+                modifieds: snap.modifieds,
+                createds: snap.createds
+            ) {
+                rows.append(entry)
+            }
+        }
+        return rows
+    }
+
+    @discardableResult
+    private func installRows(_ rows: [FileEntry]) -> Int {
+        let fragment = IndexFragment.pack(rows)
+        var lookup = PathLookup()
+        lookup.fill(from: fragment.origPathPack)
+        lock.lock()
+        namePack = fragment.namePack
+        pathPack = fragment.pathPack
+        origNamePack = fragment.origNamePack
+        origPathPack = fragment.origPathPack
+        dirBits = fragment.dirBits
+        extras = fragment.extras
+        sizes = fragment.sizes
+        modifieds = fragment.modifieds
+        createds = fragment.createds
+        byteTotal = fragment.byteTotal
+        identity = Array(0..<fragment.origNamePack.count)
+        pathIndex = lookup
+        postings.markDirty()
+        sortedAll = nil
+        let total = origNamePack.count
+        lock.unlock()
+        return total
     }
 
     private func appendPacks(_ entry: FileEntry) {
@@ -807,47 +850,6 @@ public final class FileIndex: @unchecked Sendable {
             )
         } else {
             extras.removeValue(forKey: index)
-        }
-    }
-
-    private func applyReplacementsLocked(_ replacements: [Int: FileEntry]) {
-        var rows = allEntriesLocked()
-        for (index, entry) in replacements {
-            guard index >= 0, index < rows.count else { continue }
-            rows[index] = entry
-        }
-        rewriteRowsLocked(rows)
-    }
-
-    private func rewriteRowsLocked(_ rows: [FileEntry]) {
-        namePack.reset()
-        pathPack.reset()
-        origNamePack.reset()
-        origPathPack.reset()
-        dirBits.reset()
-        extras.removeAll(keepingCapacity: true)
-        sizes.removeAll(keepingCapacity: true)
-        modifieds.removeAll(keepingCapacity: true)
-        createds.removeAll(keepingCapacity: true)
-        identity.removeAll(keepingCapacity: true)
-        sizes.reserveCapacity(rows.count)
-        modifieds.reserveCapacity(rows.count)
-        createds.reserveCapacity(rows.count)
-        namePack.reserve(rows.count)
-        pathPack.reserve(rows.count, bytesHint: rows.count * 80)
-        origNamePack.reserve(rows.count)
-        origPathPack.reserve(rows.count, bytesHint: rows.count * 80)
-        dirBits.reserve(rows.count)
-        identity.reserveCapacity(rows.count)
-        pathIndex.removeAll(keepingCapacity: true)
-        pathIndex.reserveCapacity(rows.count)
-        for (index, entry) in rows.enumerated() {
-            appendPacks(entry)
-            writeExtras(index, entry)
-            identity.append(index)
-            if !bulkLoad {
-                pathIndex[entry.path] = index
-            }
         }
     }
 

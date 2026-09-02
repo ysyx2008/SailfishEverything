@@ -18,6 +18,7 @@ enum SearchUnitTests {
         TestCase(name: "单元.路径由目录和文件名拼出", run: pathJoinsDirectoryAndName),
         TestCase(name: "单元.大名单空着不必搬下标", run: largeEmptyUsesIdentity),
         TestCase(name: "单元.名单拼回原样", run: reconstructsOriginalFields),
+        TestCase(name: "单元.删一条时搜索不被挡住", run: removeDoesNotBlockSearch),
     ]}
 
     private static func makeIndex(_ names: [(name: String, directory: String)]) -> FileIndex {
@@ -236,5 +237,31 @@ enum SearchUnitTests {
         try expectEqual(index.entries(at: index.search(query: "会议纪要")).first?.isCloudOnly, false)
         try expectEqual(index.count, 3)
         try expectEqual(index.totalBytes, 107)
+    }
+
+    private static func removeDoesNotBlockSearch() throws {
+        let index = FileIndex()
+        var rows: [FileEntry] = (0..<8_000).map { FileEntry(name: "item-\($0).txt", directory: "/tmp/bulk") }
+        rows.append(FileEntry(name: "keep-me.txt", directory: "/tmp/bulk"))
+        index.add(rows)
+        let doomed = "/tmp/bulk/item-1.txt"
+        let group = DispatchGroup()
+        var searchMs = 0.0
+        var hits = 0
+        group.enter()
+        DispatchQueue.global(qos: .userInteractive).async {
+            let start = DispatchTime.now()
+            hits = index.search(query: "keep-me").count
+            searchMs = Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000
+            group.leave()
+        }
+        index.remove(paths: [doomed])
+        group.wait()
+        try expectEqual(hits, 1)
+        try expect(searchMs < 80, "search during remove took \(searchMs)ms")
+        try expectEqual(index.count, 8_000)
+        try expect(index.names(matching: "item-1.txt").isEmpty)
+        try expectEqual(index.names(matching: "keep-me"), ["keep-me.txt"])
+        try expectEqual(index.paths(under: "/tmp/bulk").count, 8_000)
     }
 }
