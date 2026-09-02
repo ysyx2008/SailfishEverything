@@ -80,12 +80,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    func applicationDidBecomeActive(_ notification: Notification) {
-        if windowController?.window?.isVisible != true {
-            windowController?.showMainWindow()
-        }
-    }
-
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
@@ -97,14 +91,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.title = L10n.statusItemTitle
         item.button?.toolTip = L10n.productName
+        if let icon = menuBarIcon() {
+            item.button?.image = icon
+            item.button?.imagePosition = .imageOnly
+        } else {
+            item.button?.title = L10n.statusItemTitle
+        }
+        item.button?.target = self
+        item.button?.action = #selector(statusItemClicked(_:))
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusItem = item
+    }
+
+    private func menuBarIcon() -> NSImage? {
+        let source = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage
+        guard let source else { return nil }
+        let icon = NSImage(size: NSSize(width: 18, height: 18))
+        icon.lockFocus()
+        source.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18), from: .zero, operation: .copy, fraction: 1)
+        icon.unlockFocus()
+        icon.isTemplate = true
+        return icon
+    }
+
+    private func statusMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(withTitle: L10n.t(.showApp), action: #selector(showWindow), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: L10n.t(.quitApp), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        item.menu = menu
-        statusItem = item
+        return menu
+    }
+
+    @objc private func statusItemClicked(_ sender: Any?) {
+        let type = NSApp.currentEvent?.type
+        if type == .rightMouseUp {
+            statusItem?.menu = statusMenu()
+            statusItem?.button?.performClick(nil)
+            statusItem?.menu = nil
+            return
+        }
+        windowController?.toggleMainWindow()
     }
 
     @objc private func showWindow() {

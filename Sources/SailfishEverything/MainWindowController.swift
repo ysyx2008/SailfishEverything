@@ -2,6 +2,12 @@ import AppKit
 import Quartz
 import SailfishEverythingCore
 
+private final class ResidentWindow: NSWindow {
+    override func miniaturize(_ sender: Any?) {
+        (windowController as? MainWindowController)?.hideMainWindow()
+    }
+}
+
 final class SearchField: NSTextField {
     var onMoveToResults: (() -> Void)?
     var onActivate: (() -> Void)?
@@ -104,7 +110,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private var iconByExt: [String: NSImage] = [:]
 
     init(home: URL = AppRuntime.homeURL, enableWatch: Bool = !AppRuntime.isE2E, startScanning: Bool = true) {
-        let window = NSWindow(
+        let window = ResidentWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 640),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
@@ -1122,12 +1128,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        sender.orderOut(nil)
+        hideMainWindow()
         return false
+    }
+
+    func hideMainWindow() {
+        window?.orderOut(nil)
+        if !AppRuntime.isE2E {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     func showMainWindow() {
         guard let window else { return }
+        if !AppRuntime.isE2E {
+            NSApp.setActivationPolicy(.regular)
+        }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
@@ -1136,7 +1155,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     func toggleMainWindow() {
         if let window, window.isVisible, NSApp.isActive {
-            window.orderOut(nil)
+            hideMainWindow()
         } else {
             showMainWindow()
         }

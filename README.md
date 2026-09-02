@@ -19,7 +19,7 @@ Mac 上的文件名搜索。记得几个字，立刻摊开所有对得上的文�
 - 只扫个人文件夹里本机已经有的文件
 - iCloud、OneDrive 这类云盘默认不扫（太慢）；要搜，去设置的排除列表里去掉
 - 外置盘要搜，在设置里另外加
-- 关窗口不会退出，菜单栏和热键还能唤回
+- 关掉或最小化窗口会收到屏幕右上角，图标一直在，不会退出；点那个图标或按热键再唤回
 
 ### 它不做什么
 
@@ -75,7 +75,7 @@ This is a standalone app, not a feature of Sailfish.
 - Indexes files already on disk in your home folder
 - Skips cloud drives such as iCloud and OneDrive by default (they are too slow). Remove them from the exclude list in Settings if you want them
 - Extra disks can be added in Settings
-- Closing the window hides the app; the menu bar and hotkey bring it back
+- Closing or minimizing the window hides it to the icon at the top-right of the menu bar; the app keeps running. Click that icon or press the hotkey to bring it back
 
 ### What it is not
 

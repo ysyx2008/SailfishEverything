@@ -312,9 +312,13 @@ enum ProductFlowTests {
         let window = try String(contentsOf: root.appendingPathComponent("Sources/SailfishEverything/MainWindowController.swift"), encoding: .utf8)
         try expect(window.contains("super.init(window:"))
         try expect(window.contains("isReleasedWhenClosed = false"))
+        try expect(window.contains("func hideMainWindow()"))
+        try expect(window.contains("setActivationPolicy(.accessory)"))
         try expect(!window.contains("convenience init(home:"))
         let app = try String(contentsOf: root.appendingPathComponent("Sources/SailfishEverything/App.swift"), encoding: .utf8)
         try expect(app.contains("AppDelegate.shared"))
         try expect(app.contains("showMainWindow()"))
+        try expect(app.contains("installStatusItem()"))
+        try expect(app.contains("applicationShouldTerminateAfterLastWindowClosed"))
     }
 }
