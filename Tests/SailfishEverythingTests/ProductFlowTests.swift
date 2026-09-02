@@ -335,6 +335,12 @@ enum ProductFlowTests {
         try expect(app.contains("applicationShouldTerminateAfterLastWindowClosed"))
         try expect(app.contains("StandardEditingActions.undo"))
         try expect(app.contains("StandardEditingActions.redo"))
+        try expect(app.contains("StandardEditingActions.cut"))
+        try expect(app.contains("StandardEditingActions.paste"))
+        try expect(app.contains("NSApplication.hide"))
+        try expect(app.contains("performMiniaturize"))
+        try expect(app.contains("focusSearchFromMenu"))
         try expect(window.contains("allowsUndo = true"))
+        try expect(window.contains("hasMarkedText"))
     }
 }

@@ -4,6 +4,8 @@ import SailfishEverythingCore
 @objc private protocol StandardEditingActions {
     func undo(_ sender: Any?)
     func redo(_ sender: Any?)
+    func cut(_ sender: Any?)
+    func paste(_ sender: Any?)
 }
 
 @main
@@ -152,6 +154,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L10n.t(.settings), action: #selector(MainWindowController.showOptions(_:)), keyEquivalent: ",")
         appMenu.addItem(.separator())
+        let services = NSMenuItem(title: L10n.t(.services), action: nil, keyEquivalent: "")
+        let servicesMenu = NSMenu()
+        services.submenu = servicesMenu
+        NSApp.servicesMenu = servicesMenu
+        appMenu.addItem(services)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: L10n.t(.hideApp), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(withTitle: L10n.t(.hideOthers), action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(withTitle: L10n.t(.showAll), action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L10n.t(.quitApp), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
 
@@ -164,6 +177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         file.addItem(withTitle: L10n.t(.quickLook), action: #selector(MainWindowController.previewSelected(_:)), keyEquivalent: " ")
         let info = file.addItem(withTitle: L10n.t(.getInfo), action: #selector(MainWindowController.showInfo(_:)), keyEquivalent: "i")
         info.keyEquivalentModifierMask = [.command, .option]
+        file.addItem(.separator())
+        file.addItem(withTitle: L10n.t(.rename), action: #selector(MainWindowController.renameSelected(_:)), keyEquivalent: "")
+        let trash = file.addItem(withTitle: L10n.t(.moveToTrash), action: #selector(MainWindowController.deleteSelected(_:)), keyEquivalent: String(UnicodeScalar(NSBackspaceCharacter)!))
+        trash.keyEquivalentModifierMask = [.command]
         file.addItem(.separator())
         file.addItem(withTitle: L10n.t(.export), action: #selector(MainWindowController.exportResults(_:)), keyEquivalent: "s")
         file.addItem(.separator())
@@ -178,12 +195,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let redo = edit.addItem(withTitle: L10n.t(.redo), action: #selector(StandardEditingActions.redo(_:)), keyEquivalent: "z")
         redo.keyEquivalentModifierMask = [.command, .shift]
         edit.addItem(.separator())
+        edit.addItem(withTitle: L10n.t(.cut), action: #selector(StandardEditingActions.cut(_:)), keyEquivalent: "x")
         edit.addItem(withTitle: L10n.t(.copy), action: #selector(MainWindowController.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: L10n.t(.paste), action: #selector(StandardEditingActions.paste(_:)), keyEquivalent: "v")
         let copyFull = edit.addItem(withTitle: L10n.t(.copyFullName), action: #selector(MainWindowController.copyFullPath(_:)), keyEquivalent: "c")
         copyFull.keyEquivalentModifierMask = [.command, .shift]
         edit.addItem(withTitle: L10n.t(.copyPath), action: #selector(MainWindowController.copyParentPath(_:)), keyEquivalent: "")
         edit.addItem(.separator())
         edit.addItem(withTitle: L10n.t(.selectAll), action: #selector(MainWindowController.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(withTitle: L10n.t(.find), action: #selector(MainWindowController.focusSearchFromMenu(_:)), keyEquivalent: "f")
         editItem.submenu = edit
 
         let viewItem = NSMenuItem()
@@ -243,6 +263,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         index.addItem(withTitle: L10n.t(.rebuildIndex), action: #selector(MainWindowController.rebuildIndex(_:)), keyEquivalent: "")
         index.addItem(withTitle: L10n.t(.fullDiskAccess), action: #selector(MainWindowController.openDiskAccessSettings(_:)), keyEquivalent: "")
         indexItem.submenu = index
+
+        let windowItem = NSMenuItem()
+        menu.addItem(windowItem)
+        let windowMenu = NSMenu(title: L10n.t(.windowMenu))
+        windowMenu.addItem(withTitle: L10n.t(.minimize), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: L10n.t(.zoom), action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: L10n.t(.bringAllToFront), action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowItem.submenu = windowMenu
+        NSApp.windowsMenu = windowMenu
 
         let helpItem = NSMenuItem()
         menu.addItem(helpItem)

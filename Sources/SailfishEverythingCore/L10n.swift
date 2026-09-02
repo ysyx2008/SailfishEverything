@@ -130,6 +130,17 @@ public enum L10n {
         case fileMenu
         case editMenu
         case viewMenu
+        case windowMenu
+        case services
+        case hideApp
+        case hideOthers
+        case showAll
+        case minimize
+        case zoom
+        case bringAllToFront
+        case cut
+        case paste
+        case find
         case searchMenu
         case bookmarksMenu
         case toolsMenu
@@ -270,6 +281,17 @@ public enum L10n {
             .fileMenu: "File",
             .editMenu: "Edit",
             .viewMenu: "View",
+            .windowMenu: "Window",
+            .services: "Services",
+            .hideApp: "Hide \(L10n.productNameEnglish)",
+            .hideOthers: "Hide Others",
+            .showAll: "Show All",
+            .minimize: "Minimize",
+            .zoom: "Zoom",
+            .bringAllToFront: "Bring All to Front",
+            .cut: "Cut",
+            .paste: "Paste",
+            .find: "Find",
             .searchMenu: "Search",
             .bookmarksMenu: "Bookmarks",
             .toolsMenu: "Tools",
@@ -416,6 +438,17 @@ public enum L10n {
             .fileMenu: "文件",
             .editMenu: "编辑",
             .viewMenu: "显示",
+            .windowMenu: "窗口",
+            .services: "服务",
+            .hideApp: "隐藏\(L10n.productNameChinese)",
+            .hideOthers: "隐藏其他",
+            .showAll: "全部显示",
+            .minimize: "最小化",
+            .zoom: "缩放",
+            .bringAllToFront: "全部置于最前",
+            .cut: "剪切",
+            .paste: "粘贴",
+            .find: "查找",
             .searchMenu: "搜索",
             .bookmarksMenu: "书签",
             .toolsMenu: "工具",

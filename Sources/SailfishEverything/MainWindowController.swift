@@ -33,6 +33,8 @@ final class SearchField: NSTextField {
                 onMoveToResults?()
                 return true
             case 36, 76:
+                if event.modifierFlags.contains(.command) { break }
+                if isComposing { break }
                 onActivate?()
                 return true
             default:
@@ -47,10 +49,18 @@ final class SearchField: NSTextField {
         case 125:
             onMoveToResults?()
         case 36, 76:
-            onActivate?()
+            if event.modifierFlags.contains(.command) || isComposing {
+                super.keyDown(with: event)
+            } else {
+                onActivate?()
+            }
         default:
             super.keyDown(with: event)
         }
+    }
+
+    private var isComposing: Bool {
+        (currentEditor() as? NSTextView)?.hasMarkedText() == true
     }
 }
 
@@ -312,6 +322,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         if selectAll {
             searchField.currentEditor()?.selectAll(nil)
         }
+    }
+
+    @objc func focusSearchFromMenu(_ sender: Any?) {
+        focusSearch(selectAll: true)
     }
 
     private func focusResults() {
