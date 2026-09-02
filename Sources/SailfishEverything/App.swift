@@ -112,13 +112,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func menuBarIcon() -> NSImage? {
-        let symbol = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L10n.productName)
-        let configured = symbol?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 13, weight: .medium, scale: .medium)
-        )
-        guard let configured else { return nil }
-        configured.isTemplate = true
-        return configured
+        if let image = menuBarIconFromArtwork() {
+            return image
+        }
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSColor.black.setStroke()
+            let ring = menuBarGlass(
+                center: NSPoint(x: rect.midX - 0.2, y: rect.midY + 0.2),
+                radius: rect.width * 0.30,
+                handle: rect.width * 0.20,
+                width: 1.7
+            )
+            ring.stroke()
+            menuBarSailfish(in: rect.insetBy(dx: 0.2, dy: 1.6)).fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    private func menuBarIconFromArtwork() -> NSImage? {
+        guard let url = menuBarArtworkURL(), let loaded = NSImage(contentsOf: url) else { return nil }
+        let image = loaded.copy() as? NSImage ?? loaded
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }
+
+    private func menuBarArtworkURL() -> URL? {
+        if let bundled = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png") {
+            return bundled
+        }
+        var dir = Bundle.main.bundleURL
+        for _ in 0..<8 {
+            dir.deleteLastPathComponent()
+            let candidate = dir.appendingPathComponent("Resources/MenuBarIcon.png")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     private func statusMenu() -> NSMenu {
@@ -379,4 +413,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.activateFileViewerSelecting([log.fileURL])
         }
     }
+}
+
+private func menuBarGlass(center: NSPoint, radius: CGFloat, handle: CGFloat, width: CGFloat) -> NSBezierPath {
+    let ring = NSBezierPath(ovalIn: NSRect(
+        x: center.x - radius,
+        y: center.y - radius,
+        width: radius * 2,
+        height: radius * 2
+    ))
+    ring.lineWidth = width
+    let stem = NSBezierPath()
+    let angle: CGFloat = -.pi / 4
+    stem.move(to: NSPoint(
+        x: center.x + cos(angle) * (radius + width * 0.15),
+        y: center.y + sin(angle) * (radius + width * 0.15)
+    ))
+    stem.line(to: NSPoint(
+        x: center.x + cos(angle) * (radius + handle),
+        y: center.y + sin(angle) * (radius + handle)
+    ))
+    stem.lineWidth = width
+    stem.lineCapStyle = .round
+    ring.append(stem)
+    return ring
+}
+
+private func menuBarSailfish(in box: NSRect) -> NSBezierPath {
+    func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+        NSPoint(x: box.minX + x * box.width, y: box.minY + y * box.height)
+    }
+    let fish = NSBezierPath()
+    fish.move(to: p(0.97, 0.54))
+    fish.line(to: p(0.76, 0.58))
+    fish.curve(to: p(0.64, 0.60), controlPoint1: p(0.72, 0.63), controlPoint2: p(0.68, 0.62))
+    fish.line(to: p(0.60, 0.94))
+    fish.curve(to: p(0.38, 0.62), controlPoint1: p(0.54, 0.90), controlPoint2: p(0.42, 0.74))
+    fish.curve(to: p(0.24, 0.58), controlPoint1: p(0.32, 0.60), controlPoint2: p(0.28, 0.60))
+    fish.line(to: p(0.03, 0.80))
+    fish.curve(to: p(0.17, 0.51), controlPoint1: p(0.10, 0.70), controlPoint2: p(0.17, 0.58))
+    fish.curve(to: p(0.04, 0.22), controlPoint1: p(0.17, 0.44), controlPoint2: p(0.10, 0.30))
+    fish.line(to: p(0.24, 0.42))
+    fish.curve(to: p(0.64, 0.38), controlPoint1: p(0.34, 0.34), controlPoint2: p(0.50, 0.32))
+    fish.curve(to: p(0.76, 0.46), controlPoint1: p(0.70, 0.36), controlPoint2: p(0.74, 0.40))
+    fish.line(to: p(0.97, 0.54))
+    fish.close()
+    return fish
 }
