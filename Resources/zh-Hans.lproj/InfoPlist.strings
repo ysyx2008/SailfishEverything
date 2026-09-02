@@ -5,3 +5,4 @@ NSDesktopFolderUsageDescription = "旗鱼搜索会索引桌面，方便按文件
 NSDocumentsFolderUsageDescription = "旗鱼搜索会索引文稿，方便按文件名查找。";
 NSDownloadsFolderUsageDescription = "旗鱼搜索会索引下载，方便按文件名查找。";
 NSRemovableVolumesUsageDescription = "旗鱼搜索可以索引你选择的磁盘上的文件。";
+NSAppleEventsUsageDescription = "旗鱼搜索会用你的文件查看器打开文件夹。";

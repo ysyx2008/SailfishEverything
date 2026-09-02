@@ -57,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DiagnosticLog.shared.event("session", "start")
         DispatchQueue.main.async { [weak self] in
             self?.windowController?.showMainWindow()
+            AppInstall.offerMoveIfNeeded()
             self?.showOnboardingIfNeeded()
         }
     }

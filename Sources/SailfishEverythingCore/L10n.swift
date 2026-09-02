@@ -244,6 +244,11 @@ public enum L10n {
         case hotKeyControlOptionSpace
         case onboardingBody
         case onboardingFDA
+        case moveToApplicationsTitle
+        case moveToApplicationsBody
+        case moveToApplications
+        case moveToApplicationsSkip
+        case moveToApplicationsFailed
         case filterAll
         case filterAudio
         case filterCompressed
@@ -403,6 +408,11 @@ public enum L10n {
             .hotKeyControlOptionSpace: "Control-Option-Space",
             .onboardingBody: "Indexes your home folder so you can find files by name as you type.\nClosing or minimizing the window hides it to the icon at the top-right of the screen — the app keeps running. Click that icon to bring it back. Chinese input often uses Control-Space, so the default toggle is Option-Space. Change it in Settings.\nWithout Full Disk Access, some protected folders will be missing.",
             .onboardingFDA: "Open Full Disk Access…",
+            .moveToApplicationsTitle: "Move to Applications?",
+            .moveToApplicationsBody: "\(L10n.productNameEnglish) should live in the Applications folder, like other Mac apps. Move it there now?",
+            .moveToApplications: "Move to Applications",
+            .moveToApplicationsSkip: "Not Now",
+            .moveToApplicationsFailed: "Couldn’t move the app to Applications.",
             .filterAll: "All",
             .filterAudio: "Audio",
             .filterCompressed: "Compressed",
@@ -560,6 +570,11 @@ public enum L10n {
             .hotKeyControlOptionSpace: "Control-Option-Space",
             .onboardingBody: "会索引个人文件夹，边敲边出按文件名查找。\n关掉或最小化窗口会收到屏幕右上角，图标一直在，程序继续跑。点那个图标就能回来。中文输入法常用 Control-Space，所以默认快捷键是 Option-Space，可在设置里改。\n没开完全磁盘访问时，部分受保护的文件夹会搜不到。",
             .onboardingFDA: "打开「完全磁盘访问」…",
+            .moveToApplicationsTitle: "放到应用程序文件夹？",
+            .moveToApplicationsBody: "跟别的 Mac 软件一样，\(L10n.productNameChinese) 应放在应用程序文件夹里。现在移过去？",
+            .moveToApplications: "移到应用程序",
+            .moveToApplicationsSkip: "现在不要",
+            .moveToApplicationsFailed: "没法移到应用程序文件夹。",
             .filterAll: "全部",
             .filterAudio: "音频",
             .filterCompressed: "压缩包",

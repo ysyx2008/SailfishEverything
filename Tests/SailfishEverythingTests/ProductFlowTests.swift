@@ -332,6 +332,7 @@ enum ProductFlowTests {
         try expect(app.contains("AppDelegate.shared"))
         try expect(app.contains("showMainWindow()"))
         try expect(app.contains("installStatusItem()"))
+        try expect(app.contains("AppInstall.offerMoveIfNeeded()"))
         try expect(app.contains("applicationShouldTerminateAfterLastWindowClosed"))
         try expect(app.contains("StandardEditingActions.undo"))
         try expect(app.contains("StandardEditingActions.redo"))

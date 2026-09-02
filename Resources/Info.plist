@@ -47,5 +47,9 @@
 	<string>Sailfish Everything indexes Downloads so you can find files by name.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
 	<string>Sailfish Everything can index files on volumes you choose.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Sailfish Everything opens folders in your file viewer.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

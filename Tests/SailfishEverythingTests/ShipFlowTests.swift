@@ -7,6 +7,7 @@ enum ShipFlowTests {
         TestCase(name: "端到端.家目录不存在时扫盘失败", run: missingHomeFails),
         TestCase(name: "端到端.云占位仍能定位文件", run: cloudPlaceholderHasPath),
         TestCase(name: "端到端.包装带图标和产品名", run: packagedBrand),
+        TestCase(name: "端到端.只有安装盘和下载才问要不要挪位置", run: installOfferLocations),
         TestCase(name: "端到端.限定子目录只出该目录的文件", run: lookInNestedFolder),
         TestCase(name: "端到端.扫盘后按今天修改过的找", run: dateAfterScan),
         TestCase(name: "端到端.parent收窄到真实文件夹", run: parentAfterScan),
@@ -71,9 +72,53 @@ enum ShipFlowTests {
         try expect(plist.contains("Sailfish Everything"))
         try expect(!plist.contains("Namelist"))
         try expect(plist.contains("CFBundleIconFile"))
+        try expect(plist.contains("LSMinimumSystemVersion"))
+        try expect(plist.contains("14.0"))
+        try expect(plist.contains("ITSAppUsesNonExemptEncryption"))
+        try expect(FileManager.default.fileExists(atPath: repo.appendingPathComponent("Resources/PrivacyInfo.xcprivacy").path))
+        try expect(FileManager.default.fileExists(atPath: repo.appendingPathComponent("Resources/SailfishEverything.entitlements").path))
         let chinese = try String(contentsOf: repo.appendingPathComponent("Resources/zh-Hans.lproj/InfoPlist.strings"), encoding: .utf8)
         try expect(chinese.contains("旗鱼搜索"))
         try expect(!chinese.contains("Namelist"))
+    }
+
+    private static func installOfferLocations() throws {
+        let home = "/Users/me"
+        try expect(AppInstallPolicy.shouldOfferMove(
+            bundlePath: "/Volumes/Sailfish Everything/Sailfish Everything.app",
+            home: home,
+            isE2E: false
+        ))
+        try expect(AppInstallPolicy.shouldOfferMove(
+            bundlePath: home + "/Downloads/Sailfish Everything.app",
+            home: home,
+            isE2E: false
+        ))
+        try expect(AppInstallPolicy.shouldOfferMove(
+            bundlePath: "/private/var/folders/xx/AppTranslocation/abc/Sailfish Everything.app",
+            home: home,
+            isE2E: false
+        ))
+        try expect(!AppInstallPolicy.shouldOfferMove(
+            bundlePath: "/Applications/Sailfish Everything.app",
+            home: home,
+            isE2E: false
+        ))
+        try expect(!AppInstallPolicy.shouldOfferMove(
+            bundlePath: home + "/Applications/Sailfish Everything.app",
+            home: home,
+            isE2E: false
+        ))
+        try expect(!AppInstallPolicy.shouldOfferMove(
+            bundlePath: "/Users/me/Source/SailfishEverything/.build/release/Sailfish Everything.app",
+            home: home,
+            isE2E: false
+        ))
+        try expect(!AppInstallPolicy.shouldOfferMove(
+            bundlePath: "/Volumes/Sailfish Everything/Sailfish Everything.app",
+            home: home,
+            isE2E: true
+        ))
     }
 
     private static func lookInNestedFolder() throws {

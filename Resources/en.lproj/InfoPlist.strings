@@ -5,3 +5,4 @@ NSDesktopFolderUsageDescription = "Sailfish Everything indexes Desktop so you ca
 NSDocumentsFolderUsageDescription = "Sailfish Everything indexes Documents so you can find files by name.";
 NSDownloadsFolderUsageDescription = "Sailfish Everything indexes Downloads so you can find files by name.";
 NSRemovableVolumesUsageDescription = "Sailfish Everything can index files on volumes you choose.";
+NSAppleEventsUsageDescription = "Sailfish Everything opens folders in your file viewer.";

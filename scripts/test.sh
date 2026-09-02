@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "==> app icon"
-if [[ ! -f Resources/AppIcon.icns ]]; then
+if [[ ! -f Resources/AppIcon.icns || ! -f Resources/MenuBarIcon.png ]]; then
   /usr/bin/swift scripts/make-icon.swift
 fi
 
@@ -26,7 +26,15 @@ test -f "$APP/Contents/Resources/AppIcon.icns"
 /usr/bin/grep -q "Sailfish Everything" "$APP/Contents/Resources/en.lproj/InfoPlist.strings"
 echo "packaged $APP"
 test -f "dist/Sailfish Everything.dmg"
+test -f "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
+/usr/bin/grep -q "LSMinimumSystemVersion" "$APP/Contents/Info.plist"
+/usr/bin/grep -q "14.0" "$APP/Contents/Info.plist"
 /usr/bin/codesign --verify "$APP"
+SIGN_INFO="$(/usr/bin/codesign -d --verbose=4 "$APP" 2>&1 || true)"
+print -r -- "$SIGN_INFO" | /usr/bin/grep -q "flags=.*runtime"
+ARCHS="$(/usr/bin/lipo -archs "$APP/Contents/MacOS/SailfishEverything")"
+print -r -- "$ARCHS" | /usr/bin/grep -q arm64
+print -r -- "$ARCHS" | /usr/bin/grep -q x86_64
 echo "signed and dmg ready"
 
 echo "==> packaged app e2e"
