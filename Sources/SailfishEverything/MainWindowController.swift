@@ -476,7 +476,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     @objc func openSelected(_ sender: Any?) {
         for entry in selectedEntries() {
             if entry.isDirectory {
-                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: entry.path)
+                openFolderInFileViewer(URL(fileURLWithPath: entry.path, isDirectory: true))
             } else {
                 NSWorkspace.shared.open(URL(fileURLWithPath: entry.path, isDirectory: false))
             }
@@ -494,9 +494,33 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     @objc func openPath(_ sender: Any?) {
-        for entry in selectedEntries() {
-            NSWorkspace.shared.selectFile(entry.path, inFileViewerRootedAtPath: entry.directory)
+        let urls = selectedEntries().map { URL(fileURLWithPath: $0.path, isDirectory: $0.isDirectory) }
+        revealInFileViewer(urls)
+    }
+
+    private func openFolderInFileViewer(_ url: URL) {
+        if let viewer = preferredFileViewer() {
+            NSWorkspace.shared.open([url], withApplicationAt: viewer, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            NSWorkspace.shared.open(url)
         }
+    }
+
+    private func revealInFileViewer(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        if let viewer = preferredFileViewer() {
+            NSWorkspace.shared.open(urls, withApplicationAt: viewer, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+        }
+    }
+
+    private func preferredFileViewer() -> URL? {
+        guard let bundleId = UserDefaults.standard.string(forKey: "NSFileViewer"),
+              !bundleId.isEmpty,
+              bundleId != "com.apple.finder"
+        else { return nil }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
     }
 
     @objc func copyFullPath(_ sender: Any?) {
