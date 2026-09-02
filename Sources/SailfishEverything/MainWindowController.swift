@@ -6,11 +6,25 @@ private final class ResidentWindow: NSWindow {
     override func miniaturize(_ sender: Any?) {
         (windowController as? MainWindowController)?.hideMainWindow()
     }
+
+    override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        let editor = super.fieldEditor(createFlag, for: object)
+        (editor as? NSTextView)?.allowsUndo = true
+        return editor
+    }
 }
 
 final class SearchField: NSTextField {
     var onMoveToResults: (() -> Void)?
     var onActivate: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if let editor = currentEditor() as? NSTextView {
+            editor.allowsUndo = true
+        }
+        return accepted
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.type == .keyDown {

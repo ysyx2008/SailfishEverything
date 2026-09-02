@@ -1,6 +1,11 @@
 import AppKit
 import SailfishEverythingCore
 
+@objc private protocol StandardEditingActions {
+    func undo(_ sender: Any?)
+    func redo(_ sender: Any?)
+}
+
 @main
 enum SailfishEverythingApp {
     static func main() {
@@ -169,6 +174,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let editItem = NSMenuItem()
         menu.addItem(editItem)
         let edit = NSMenu(title: L10n.t(.editMenu))
+        edit.addItem(withTitle: L10n.t(.undo), action: #selector(StandardEditingActions.undo(_:)), keyEquivalent: "z")
+        let redo = edit.addItem(withTitle: L10n.t(.redo), action: #selector(StandardEditingActions.redo(_:)), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
         edit.addItem(withTitle: L10n.t(.copy), action: #selector(MainWindowController.copy(_:)), keyEquivalent: "c")
         let copyFull = edit.addItem(withTitle: L10n.t(.copyFullName), action: #selector(MainWindowController.copyFullPath(_:)), keyEquivalent: "c")
         copyFull.keyEquivalentModifierMask = [.command, .shift]

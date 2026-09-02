@@ -142,6 +142,8 @@ public enum L10n {
         case export
         case close
         case exit
+        case undo
+        case redo
         case copy
         case copyFullName
         case copyPath
@@ -280,6 +282,8 @@ public enum L10n {
             .export: "Export…",
             .close: "Close",
             .exit: "Exit",
+            .undo: "Undo",
+            .redo: "Redo",
             .copy: "Copy",
             .copyFullName: "Copy Full Name to Clipboard",
             .copyPath: "Copy Path to Clipboard",
@@ -424,6 +428,8 @@ public enum L10n {
             .export: "导出…",
             .close: "关闭",
             .exit: "退出",
+            .undo: "撤销",
+            .redo: "重做",
             .copy: "拷贝",
             .copyFullName: "拷贝完整路径",
             .copyPath: "拷贝所在文件夹",

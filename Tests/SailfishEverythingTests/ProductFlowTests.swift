@@ -333,5 +333,8 @@ enum ProductFlowTests {
         try expect(app.contains("showMainWindow()"))
         try expect(app.contains("installStatusItem()"))
         try expect(app.contains("applicationShouldTerminateAfterLastWindowClosed"))
+        try expect(app.contains("StandardEditingActions.undo"))
+        try expect(app.contains("StandardEditingActions.redo"))
+        try expect(window.contains("allowsUndo = true"))
     }
 }
