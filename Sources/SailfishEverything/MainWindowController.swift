@@ -140,6 +140,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private var searchField: SearchField!
     private var tableView: ResultsTableView!
     private var statusLeft: NSTextField!
+    private var statusDiskAccessSeparator: NSTextField!
+    private var statusDiskAccessButton: NSButton!
     private var statusRight: NSTextField!
     private var headerMenu: NSMenu!
     private let preview = PreviewController()
@@ -300,7 +302,32 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         statusLeft.translatesAutoresizingMaskIntoConstraints = false
         statusLeft.font = NSFont.systemFont(ofSize: 11)
         statusLeft.textColor = .secondaryLabelColor
-        statusBar.addSubview(statusLeft)
+
+        statusDiskAccessSeparator = NSTextField(labelWithString: "·")
+        statusDiskAccessSeparator.translatesAutoresizingMaskIntoConstraints = false
+        statusDiskAccessSeparator.font = NSFont.systemFont(ofSize: 11)
+        statusDiskAccessSeparator.textColor = .secondaryLabelColor
+        statusDiskAccessSeparator.isHidden = true
+
+        statusDiskAccessButton = NSButton(
+            title: L10n.t(.needFullDiskAccess),
+            target: self,
+            action: #selector(openDiskAccessSettings(_:))
+        )
+        statusDiskAccessButton.translatesAutoresizingMaskIntoConstraints = false
+        statusDiskAccessButton.bezelStyle = .recessed
+        statusDiskAccessButton.controlSize = .small
+        statusDiskAccessButton.font = NSFont.systemFont(ofSize: 11)
+        statusDiskAccessButton.toolTip = L10n.t(.openFullDiskAccess)
+        statusDiskAccessButton.refusesFirstResponder = true
+        statusDiskAccessButton.isHidden = true
+
+        let statusLeading = NSStackView(views: [statusLeft, statusDiskAccessSeparator, statusDiskAccessButton])
+        statusLeading.translatesAutoresizingMaskIntoConstraints = false
+        statusLeading.orientation = .horizontal
+        statusLeading.alignment = .centerY
+        statusLeading.spacing = 6
+        statusBar.addSubview(statusLeading)
 
         statusRight = NSTextField(labelWithString: "")
         statusRight.translatesAutoresizingMaskIntoConstraints = false
@@ -328,11 +355,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             statusBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             statusBar.heightAnchor.constraint(equalToConstant: 22),
 
-            statusLeft.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor, constant: 8),
-            statusLeft.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
+            statusLeading.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor, constant: 8),
+            statusLeading.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
             statusRight.trailingAnchor.constraint(equalTo: statusBar.trailingAnchor, constant: -8),
             statusRight.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
-            statusLeft.trailingAnchor.constraint(lessThanOrEqualTo: statusRight.leadingAnchor, constant: -12),
+            statusLeading.trailingAnchor.constraint(lessThanOrEqualTo: statusRight.leadingAnchor, constant: -12),
         ])
 
         searchField.nextKeyView = tableView
@@ -644,10 +671,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         if !isIndexing, options.regex, !Query.isValidRegex(query, matchCase: options.matchCase) {
             left = L10n.t(.invalidRegex) + left
         }
-        if !AppRuntime.isE2E, !isIndexing, !DiskAccess.isFullyTrusted(home: home) {
-            left += " · " + L10n.t(.needFullDiskAccess)
-        }
         statusLeft.stringValue = left
+        setDiskAccessPromptVisible(!AppRuntime.isE2E && !isIndexing && !DiskAccess.isFullyTrusted(home: home))
 
         var flags: [String] = []
         if options.matchCase { flags.append("CASE") }
@@ -659,6 +684,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             flags.append(URL(fileURLWithPath: options.inFolder).lastPathComponent.uppercased())
         }
         statusRight.stringValue = flags.joined(separator: "   ")
+    }
+
+    private func setDiskAccessPromptVisible(_ visible: Bool) {
+        statusDiskAccessSeparator.isHidden = !visible
+        statusDiskAccessButton.isHidden = !visible
     }
 
     @objc private func statusRightClicked(_ sender: NSClickGestureRecognizer) {
@@ -1307,6 +1337,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     func scannerDidFail(_ scanner: FileScanner, error: Error) {
         isIndexing = false
         statusLeft.stringValue = error.localizedDescription
+        setDiskAccessPromptVisible(false)
         if E2EDump.write(index: index, title: window?.title ?? "", error: error.localizedDescription) {
             NSApp.terminate(nil)
         }
@@ -1322,6 +1353,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {}
 
     func windowDidBecomeKey(_ notification: Notification) {
+        updateStatus()
         if tableView.selectedRow < 0 {
             focusSearch(selectAll: false)
         }

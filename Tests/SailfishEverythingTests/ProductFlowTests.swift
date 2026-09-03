@@ -326,6 +326,8 @@ enum ProductFlowTests {
         try expect(window.contains("super.init(window:"))
         try expect(window.contains("isReleasedWhenClosed = false"))
         try expect(window.contains("func hideMainWindow()"))
+        try expect(window.contains("needFullDiskAccess"))
+        try expect(window.contains("openDiskAccessSettings"))
         try expect(window.contains("setActivationPolicy(.accessory)"))
         try expect(!window.contains("convenience init(home:"))
         let app = try String(contentsOf: root.appendingPathComponent("Sources/SailfishEverything/App.swift"), encoding: .utf8)
