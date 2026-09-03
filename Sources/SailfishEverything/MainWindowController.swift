@@ -449,6 +449,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             total: index.count,
             allowFullSort: !isIndexing
         ) {
+            let keep = snapshotSelectedFileIndices()
             isSearching = false
             showingIdentity = true
             resultIndices = []
@@ -456,7 +457,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             paintedRow = -1
             paintedEntry = nil
             DiagnosticLog.shared.event("search", "identity rows=\(index.count)")
-            reloadTable(reason: "identity")
+            reloadTable(reason: "identity", keepFileIndices: keep)
             updateStatus()
             return
         }
@@ -505,6 +506,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
                     DiagnosticLog.shared.event("search", "stale q=\"\(clipped)\"")
                     return
                 }
+                let keep = self.snapshotSelectedFileIndices()
                 let stored = query.isEmpty && indices.count > 8_192 ? [] : indices
                 self.lastSearch = SearchCursor(query: query, options: options, filter: filter, sort: sort, indices: stored)
                 self.showingIdentity = false
@@ -512,39 +514,88 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
                 self.paintedRow = -1
                 self.paintedEntry = nil
                 self.isSearching = false
-                self.reloadTable(reason: "search")
+                self.reloadTable(reason: "search", keepFileIndices: keep)
                 self.updateStatus()
             }
         }
     }
 
-    private func reloadTable(reason: String) {
-        let selectedPaths = Set(selectedEntries().map(\.path))
+    private static let cheapTableReloadLimit = 8_192
+
+    private func snapshotSelectedFileIndices() -> Set<Int> {
+        let rows = tableView.selectedRowIndexes
+        guard !rows.isEmpty, rows.count <= Self.cheapTableReloadLimit else { return [] }
+        var out = Set<Int>()
+        out.reserveCapacity(rows.count)
+        for row in rows {
+            if let index = indexAtRow(row) {
+                out.insert(index)
+            }
+        }
+        return out
+    }
+
+    private func reloadTable(reason: String, keepFileIndices: Set<Int>? = nil) {
+        let keep = keepFileIndices ?? snapshotSelectedFileIndices()
         let keepFocus = window?.firstResponder === tableView
         let rows = displayedCount
         DiagnosticLog.shared.event("table", "reload start \(reason) rows=\(rows)")
         let start = DispatchTime.now()
-        tableView.reloadData()
-        if !selectedPaths.isEmpty {
-            var keep = IndexSet()
-            for row in 0..<displayedCount {
-                guard let entryIndex = indexAtRow(row), let entry = index.entry(at: entryIndex) else { continue }
-                if selectedPaths.contains(entry.path) {
-                    keep.insert(row)
-                }
-            }
-            if !keep.isEmpty {
-                tableView.selectRowIndexes(keep, byExtendingSelection: false)
-                if let first = keep.min() {
-                    tableView.scrollRowToVisible(first)
-                }
-            }
-        }
+        refreshTableRows(count: rows)
+        restoreSelection(keep, scroll: rows <= Self.cheapTableReloadLimit)
         if keepFocus {
             window?.makeFirstResponder(tableView)
         }
         let ms = DiagnosticLog.elapsedMilliseconds(since: start)
         DiagnosticLog.shared.event("table", "reload done \(reason) \(DiagnosticLog.formatDuration(ms))")
+    }
+
+    private func refreshTableRows(count: Int) {
+        if count > Self.cheapTableReloadLimit {
+            var dirty = IndexSet()
+            tableView.enumerateAvailableRowViews { _, row in
+                if row >= 0 { dirty.insert(row) }
+            }
+            tableView.noteNumberOfRowsChanged()
+            let visible = tableView.rows(in: tableView.visibleRect)
+            if visible.length > 0 {
+                let end = min(visible.location + visible.length, count)
+                if visible.location < end {
+                    dirty.formUnion(IndexSet(integersIn: visible.location ..< end))
+                }
+            }
+            dirty = IndexSet(dirty.filter { $0 < count })
+            if !dirty.isEmpty, tableView.numberOfColumns > 0 {
+                tableView.reloadData(
+                    forRowIndexes: dirty,
+                    columnIndexes: IndexSet(integersIn: 0 ..< tableView.numberOfColumns)
+                )
+            }
+            return
+        }
+        tableView.reloadData()
+    }
+
+    private func restoreSelection(_ fileIndices: Set<Int>, scroll: Bool) {
+        guard !fileIndices.isEmpty else { return }
+        var keep = IndexSet()
+        if showingIdentity {
+            let total = index.count
+            for fileIndex in fileIndices where fileIndex >= 0 && fileIndex < total {
+                keep.insert(fileIndex)
+            }
+        } else {
+            for (row, fileIndex) in resultIndices.enumerated() {
+                if fileIndices.contains(fileIndex) {
+                    keep.insert(row)
+                }
+            }
+        }
+        guard !keep.isEmpty else { return }
+        tableView.selectRowIndexes(keep, byExtendingSelection: false)
+        if scroll, let first = keep.min() {
+            tableView.scrollRowToVisible(first)
+        }
     }
 
     private func scheduleSearchRefresh() {
