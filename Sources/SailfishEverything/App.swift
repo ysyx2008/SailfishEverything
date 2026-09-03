@@ -206,10 +206,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let fileItem = NSMenuItem()
         menu.addItem(fileItem)
         let file = NSMenu(title: L10n.t(.fileMenu))
-        file.addItem(withTitle: L10n.t(.open), action: #selector(MainWindowController.openSelected(_:)), keyEquivalent: "\r")
+        file.addItem(withTitle: L10n.t(.open), action: #selector(MainWindowController.openSelected(_:)), keyEquivalent: "o")
         let openPath = file.addItem(withTitle: L10n.t(.openPath), action: #selector(MainWindowController.openPath(_:)), keyEquivalent: "\r")
         openPath.keyEquivalentModifierMask = [.command]
-        file.addItem(withTitle: L10n.t(.quickLook), action: #selector(MainWindowController.previewSelected(_:)), keyEquivalent: " ")
+        file.addItem(withTitle: L10n.t(.quickLook), action: #selector(MainWindowController.previewSelected(_:)), keyEquivalent: "")
         let info = file.addItem(withTitle: L10n.t(.getInfo), action: #selector(MainWindowController.showInfo(_:)), keyEquivalent: "i")
         info.keyEquivalentModifierMask = [.command, .option]
         file.addItem(.separator())

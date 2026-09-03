@@ -15,52 +15,12 @@ private final class ResidentWindow: NSWindow {
 }
 
 final class SearchField: NSTextField {
-    var onMoveToResults: (() -> Void)?
-    var onActivate: (() -> Void)?
-
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if let editor = currentEditor() as? NSTextView {
             editor.allowsUndo = true
         }
         return accepted
-    }
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.type == .keyDown {
-            switch event.keyCode {
-            case 125:
-                onMoveToResults?()
-                return true
-            case 36, 76:
-                if event.modifierFlags.contains(.command) { break }
-                if isComposing { break }
-                onActivate?()
-                return true
-            default:
-                break
-            }
-        }
-        return super.performKeyEquivalent(with: event)
-    }
-
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 125:
-            onMoveToResults?()
-        case 36, 76:
-            if event.modifierFlags.contains(.command) || isComposing {
-                super.keyDown(with: event)
-            } else {
-                onActivate?()
-            }
-        default:
-            super.keyDown(with: event)
-        }
-    }
-
-    private var isComposing: Bool {
-        (currentEditor() as? NSTextView)?.hasMarkedText() == true
     }
 }
 
@@ -69,9 +29,20 @@ final class ResultsTableView: NSTableView {
     var onOpenPath: (() -> Void)?
     var onFocusSearch: (() -> Void)?
     var onPreview: (() -> Void)?
+    var onTrash: (() -> Void)?
+    var onWriteSelectedFiles: ((NSPasteboard) -> Bool)?
 
     private var clickToggleRow: Int?
     private var clickToggleOrigin: NSPoint?
+    private var didDrag = false
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted, selectedRow < 0, numberOfRows > 0 {
+            selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        }
+        return accepted
+    }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
@@ -83,6 +54,8 @@ final class ResultsTableView: NSTableView {
             } else {
                 onOpen?()
             }
+        case 51 where event.modifierFlags.contains(.command):
+            onTrash?()
         case 53:
             cancelOperation(nil)
         case 49:
@@ -90,6 +63,17 @@ final class ResultsTableView: NSTableView {
         default:
             super.keyDown(with: event)
         }
+    }
+
+    override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? {
+        if selectedRow >= 0, sendType == .fileURL || sendType?.rawValue == "NSFilenamesPboardType" {
+            return self
+        }
+        return super.validRequestor(forSendType: sendType, returnType: returnType)
+    }
+
+    @objc func writeSelection(to pasteboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        onWriteSelectedFiles?(pasteboard) ?? false
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -101,6 +85,7 @@ final class ResultsTableView: NSTableView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        didDrag = false
         if event.clickCount >= 2 {
             clickToggleRow = nil
             clickToggleOrigin = nil
@@ -122,15 +107,24 @@ final class ResultsTableView: NSTableView {
 
     override func mouseUp(with event: NSEvent) {
         super.mouseUp(with: event)
+        let skipToggle = didDrag
+        didDrag = false
         let row = clickToggleRow
         let origin = clickToggleOrigin
         clickToggleRow = nil
         clickToggleOrigin = nil
-        guard event.clickCount < 2, let row, let origin else { return }
+        guard !skipToggle, event.clickCount < 2, let row, let origin else { return }
         let point = convert(event.locationInWindow, from: nil)
         let dragged = hypot(point.x - origin.x, point.y - origin.y) > 4
         guard !dragged, self.row(at: point) == row, selectedRowIndexes == IndexSet(integer: row) else { return }
         deselectRow(row)
+    }
+
+    override func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
+        didDrag = true
+        clickToggleRow = nil
+        clickToggleOrigin = nil
+        super.draggingSession(session, willBeginAt: screenPoint)
     }
 }
 
@@ -237,8 +231,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         searchField.isBordered = true
         searchField.drawsBackground = true
         searchField.delegate = self
-        searchField.onMoveToResults = { [weak self] in self?.focusResults() }
-        searchField.onActivate = { [weak self] in self?.activateFromSearch() }
         content.addSubview(searchField)
 
         let scroll = NSScrollView()
@@ -269,7 +261,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         tableView.onOpenPath = { [weak self] in self?.openPath(nil) }
         tableView.onFocusSearch = { [weak self] in self?.focusSearch(selectAll: false) }
         tableView.onPreview = { [weak self] in self?.previewSelected(nil) }
+        tableView.onTrash = { [weak self] in self?.deleteSelected(nil) }
+        tableView.onWriteSelectedFiles = { [weak self] pasteboard in
+            guard let self else { return false }
+            let entries = self.selectedEntries()
+            guard !entries.isEmpty else { return false }
+            self.writeFiles(entries, to: pasteboard)
+            return true
+        }
         tableView.menu = makeContextMenu()
+        tableView.setDraggingSourceOperationMask([.copy, .move, .generic], forLocal: false)
+        tableView.setDraggingSourceOperationMask([.copy, .move, .generic], forLocal: true)
+        tableView.allowsTypeSelect = false
 
         addColumn(id: "name", title: L10n.t(.columnName), width: 280, min: 80)
         addColumn(id: "path", title: L10n.t(.columnPath), width: 420, min: 80)
@@ -332,6 +335,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             statusLeft.trailingAnchor.constraint(lessThanOrEqualTo: statusRight.leadingAnchor, constant: -12),
         ])
 
+        searchField.nextKeyView = tableView
+        tableView.nextKeyView = searchField
         window.makeFirstResponder(searchField)
         updateStatus()
     }
@@ -394,6 +399,22 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             history = SearchHistoryStore.record(query)
         }
         rerunSearch()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(moveDown(_:))
+            || commandSelector == #selector(scrollPageDown(_:))
+            || commandSelector == #selector(insertTab(_:)) {
+            if textView.hasMarkedText() { return false }
+            focusResults()
+            return true
+        }
+        if commandSelector == #selector(insertNewline(_:)) {
+            if textView.hasMarkedText() { return false }
+            activateFromSearch()
+            return true
+        }
+        return false
     }
 
     private var displayedCount: Int {
@@ -498,10 +519,30 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     private func reloadTable(reason: String) {
+        let selectedPaths = Set(selectedEntries().map(\.path))
+        let keepFocus = window?.firstResponder === tableView
         let rows = displayedCount
         DiagnosticLog.shared.event("table", "reload start \(reason) rows=\(rows)")
         let start = DispatchTime.now()
         tableView.reloadData()
+        if !selectedPaths.isEmpty {
+            var keep = IndexSet()
+            for row in 0..<displayedCount {
+                guard let entryIndex = indexAtRow(row), let entry = index.entry(at: entryIndex) else { continue }
+                if selectedPaths.contains(entry.path) {
+                    keep.insert(row)
+                }
+            }
+            if !keep.isEmpty {
+                tableView.selectRowIndexes(keep, byExtendingSelection: false)
+                if let first = keep.min() {
+                    tableView.scrollRowToVisible(first)
+                }
+            }
+        }
+        if keepFocus {
+            window?.makeFirstResponder(tableView)
+        }
         let ms = DiagnosticLog.elapsedMilliseconds(since: start)
         DiagnosticLog.shared.event("table", "reload done \(reason) \(DiagnosticLog.formatDuration(ms))")
     }
@@ -646,7 +687,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             searchField.currentEditor()?.copy(sender)
             return
         }
-        copyStrings(selectedEntries().map(\.name))
+        writeFiles(selectedEntries(), to: .general)
     }
 
     @objc override func selectAll(_ sender: Any?) {
@@ -657,10 +698,24 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         tableView.selectAll(sender)
     }
 
+    private static let filenamesPboardType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+
     private func copyStrings(_ strings: [String]) {
         guard !strings.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(strings.joined(separator: "\n"), forType: .string)
+    }
+
+    private func writeFiles(_ entries: [FileEntry], to pasteboard: NSPasteboard) {
+        let urls = fileURLs(for: entries)
+        guard !urls.isEmpty else { return }
+        pasteboard.clearContents()
+        pasteboard.writeObjects(urls as [NSURL])
+        pasteboard.setPropertyList(urls.map(\.path), forType: Self.filenamesPboardType)
+    }
+
+    private func fileURLs(for entries: [FileEntry]) -> [URL] {
+        entries.map { URL(fileURLWithPath: $0.path, isDirectory: $0.isDirectory) }
     }
 
     private func selectedIndexList() -> [Int] {
@@ -993,6 +1048,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             text.lineBreakMode = .byTruncatingMiddle
             text.drawsBackground = false
             text.isBordered = false
+            text.refusesFirstResponder = true
+            text.isSelectable = false
             created.addSubview(text)
             created.textField = text
             if id == "name" {
@@ -1096,7 +1153,22 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
         guard tableView === self.tableView else { return nil }
         guard let entryIndex = indexAtRow(row), let entry = index.entry(at: entryIndex) else { return nil }
-        return URL(fileURLWithPath: entry.path) as NSURL
+        return URL(fileURLWithPath: entry.path, isDirectory: entry.isDirectory) as NSURL
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        draggingSession session: NSDraggingSession,
+        willBeginAt screenPoint: NSPoint,
+        forRowIndexes rowIndexes: IndexSet
+    ) {
+        guard tableView === self.tableView else { return }
+        let paths = rowIndexes.compactMap { row -> String? in
+            guard let entryIndex = indexAtRow(row), let entry = index.entry(at: entryIndex) else { return nil }
+            return entry.path
+        }
+        guard !paths.isEmpty else { return }
+        session.draggingPasteboard.setPropertyList(paths, forType: Self.filenamesPboardType)
     }
 
     private func icon(for entry: FileEntry) -> NSImage {
@@ -1234,6 +1306,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         }
     }
 
+    private var isResultsFirstResponder: Bool {
+        window?.firstResponder === tableView
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(toggleMatchCase(_:)):
@@ -1255,9 +1331,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             let relative = menuItem.representedObject as? String ?? ""
             menuItem.state = options.inFolder == IndexSettings.resolvedLookIn(relative, home: home) ? .on : .off
             return true
+        case #selector(copy(_:)):
+            return window?.firstResponder === searchField.currentEditor() || tableView.selectedRow >= 0
+        case #selector(deleteSelected(_:)):
+            return isResultsFirstResponder && tableView.selectedRow >= 0
         case #selector(openSelected(_:)), #selector(openPath(_:)),
              #selector(copyFullPath(_:)), #selector(copyParentPath(_:)),
-             #selector(deleteSelected(_:)), #selector(renameSelected(_:)),
+             #selector(renameSelected(_:)),
              #selector(previewSelected(_:)), #selector(showInfo(_:)):
             return tableView.selectedRow >= 0
         default:

@@ -343,5 +343,16 @@ enum ProductFlowTests {
         try expect(app.contains("focusSearchFromMenu"))
         try expect(window.contains("allowsUndo = true"))
         try expect(window.contains("hasMarkedText"))
+        try expect(window.contains("doCommandBy"))
+        try expect(window.contains("moveDown"))
+        try expect(window.contains("setDraggingSourceOperationMask"))
+        try expect(window.contains("NSFilenamesPboardType"))
+        try expect(window.contains("writeFiles"))
+        try expect(window.contains("pasteboardWriterForRow"))
+        try expect(window.contains("isResultsFirstResponder"))
+        try expect(window.contains("validRequestor"))
+        try expect(window.contains("insertTab"))
+        try expect(app.contains("keyEquivalent: \"o\""))
+        try expect(!app.contains("previewSelected(_:)), keyEquivalent: \" \""))
     }
 }
