@@ -72,14 +72,18 @@ public enum L10n {
         bytes: Int64,
         isSearching: Bool,
         indexingPhase: String?,
-        indexed: Int
+        indexed: Int,
+        listIsUnfiltered: Bool
     ) -> String {
-        let listIsJustIndexed = selected == 0 && bytes == 0 && objects == indexed
+        let hideObjectCount = indexingPhase != nil
+            && selected == 0
+            && bytes == 0
+            && (objects == indexed || listIsUnfiltered)
         var detail = ""
-        if indexingPhase == nil || !listIsJustIndexed {
+        if !hideObjectCount {
             detail = statusLine(objects: objects, selected: selected, bytes: bytes)
         }
-        if isSearching {
+        if isSearching, !hideObjectCount {
             detail = t(.searching) + detail
         }
         guard let phase = indexingPhase else { return detail }

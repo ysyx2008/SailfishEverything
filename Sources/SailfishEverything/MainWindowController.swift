@@ -635,7 +635,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             bytes: bytes,
             isSearching: isSearching,
             indexingPhase: isIndexing ? indexingPhase : nil,
-            indexed: indexedCount
+            indexed: indexedCount,
+            listIsUnfiltered: Query.parse(query).isEmpty
+                && filter == .all
+                && options.inFolder.isEmpty
+                && !options.regex
         )
         if !isIndexing, options.regex, !Query.isValidRegex(query, matchCase: options.matchCase) {
             left = L10n.t(.invalidRegex) + left

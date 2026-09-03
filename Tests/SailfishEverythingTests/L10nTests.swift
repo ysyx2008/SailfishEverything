@@ -82,12 +82,25 @@ enum L10nTests {
             bytes: 0,
             isSearching: false,
             indexingPhase: "个人文件夹",
-            indexed: 100
+            indexed: 100,
+            listIsUnfiltered: true
         )
         try expect(same.contains("已收录"))
         try expect(same.contains("个对象"), same)
         try expectEqual(same.components(separatedBy: ResultStats.formatCount(100)).count - 1, 1)
         try expectEqual(same.components(separatedBy: "个对象").count - 1, 1)
+
+        let catchingUp = L10n.statusLeft(
+            objects: 98,
+            selected: 0,
+            bytes: 0,
+            isSearching: true,
+            indexingPhase: "个人文件夹",
+            indexed: 100,
+            listIsUnfiltered: true
+        )
+        try expect(!catchingUp.contains("98"), catchingUp)
+        try expectEqual(catchingUp.components(separatedBy: ResultStats.formatCount(100)).count - 1, 1)
 
         let filtered = L10n.statusLeft(
             objects: 12,
@@ -95,7 +108,8 @@ enum L10nTests {
             bytes: 0,
             isSearching: false,
             indexingPhase: "个人文件夹",
-            indexed: 100
+            indexed: 100,
+            listIsUnfiltered: false
         )
         try expect(filtered.contains("已收录"))
         try expect(filtered.contains("12 个对象"))
@@ -106,7 +120,8 @@ enum L10nTests {
             bytes: 0,
             isSearching: false,
             indexingPhase: nil,
-            indexed: 100
+            indexed: 100,
+            listIsUnfiltered: true
         )
         try expectEqual(done, "12 个对象")
     }
