@@ -9,6 +9,7 @@ enum L10nTests {
         TestCase(name: "单元.中英文案都齐", run: bothLanguagesFilled),
         TestCase(name: "单元.状态栏中英不同", run: statusLineLocalized),
         TestCase(name: "单元.扫盘时收录数不跟同样的对象数", run: indexingStatusOmitsDuplicateCount),
+        TestCase(name: "单元.窗口标题带版本号", run: windowTitleIncludesVersion),
     ]}
 
     private static func resolvePreferred() throws {
@@ -124,5 +125,18 @@ enum L10nTests {
             listIsUnfiltered: true
         )
         try expectEqual(done, "12 个对象")
+    }
+
+    private static func windowTitleIncludesVersion() throws {
+        let previous = L10n.language
+        defer { L10n.language = previous }
+        let version = try packagingMarketingVersion(repo: repoRoot())
+        L10n.language = .english
+        try expectEqual(L10n.windowTitle(version: version), "Sailfish Everything \(version)")
+        try expectEqual(L10n.windowTitle(version: nil), "Sailfish Everything")
+        try expectEqual(L10n.windowTitle(version: ""), "Sailfish Everything")
+        L10n.language = .chinese
+        try expectEqual(L10n.windowTitle(version: version), "旗鱼搜索 \(version)")
+        try expectEqual(L10n.windowTitle(version: nil), "旗鱼搜索")
     }
 }

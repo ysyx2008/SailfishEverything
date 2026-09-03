@@ -141,7 +141,9 @@ enum ProductFlowTests {
         try expect(!app.contains("About Everything\""))
         try expect(!app.contains("Namelist"))
         let window = try String(contentsOf: root.appendingPathComponent("Sources/SailfishEverything/MainWindowController.swift"), encoding: .utf8)
-        try expect(window.contains("L10n.productName"))
+        try expect(window.contains("AppRuntime.windowTitle"))
+        let version = try packagingMarketingVersion(repo: root)
+        try expectEqual(L10n.windowTitle(version: version), "Sailfish Everything \(version)")
         try expect(window.contains("previewSelected"))
         try expect(window.contains("showInfo"))
         try expect(app.contains("showSearchHelp"))
@@ -162,6 +164,8 @@ enum ProductFlowTests {
         L10n.language = .chinese
         defer { L10n.language = previous }
         try expectEqual(L10n.productName, "旗鱼搜索")
+        let version = try packagingMarketingVersion(repo: root)
+        try expectEqual(L10n.windowTitle(version: version), "旗鱼搜索 \(version)")
         try expectEqual(L10n.t(.aboutApp), "关于旗鱼搜索")
         try expect(L10n.t(.quitApp).contains("旗鱼搜索"))
         try expect(!L10n.productName.contains("Everything"))

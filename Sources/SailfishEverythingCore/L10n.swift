@@ -24,6 +24,11 @@ public enum L10n {
         language == .chinese ? productNameChinese : productNameEnglish
     }
 
+    public static func windowTitle(version: String?) -> String {
+        guard let version, !version.isEmpty else { return productName }
+        return "\(productName) \(version)"
+    }
+
     public static var statusItemTitle: String {
         language == .chinese ? "旗" : "SE"
     }

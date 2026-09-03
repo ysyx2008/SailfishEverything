@@ -180,7 +180,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             backing: .buffered,
             defer: false
         )
-        window.title = L10n.productName
+        window.title = AppRuntime.windowTitle
         window.minSize = NSSize(width: 720, height: 360)
         window.isReleasedWhenClosed = false
         window.isRestorable = false

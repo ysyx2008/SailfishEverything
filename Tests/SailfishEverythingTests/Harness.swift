@@ -27,6 +27,26 @@ func bench(_ name: String, _ ms: Double) {
     print(String(format: "bench %6.2fms  %@", ms, name as NSString))
 }
 
+func repoRoot(filePath: String = #filePath) -> URL {
+    URL(fileURLWithPath: filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+}
+
+func packagingMarketingVersion(repo: URL) throws -> String {
+    let url = repo.appendingPathComponent("Resources/Info.plist")
+    let data = try Data(contentsOf: url)
+    guard let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+          let version = plist["CFBundleShortVersionString"] as? String
+    else {
+        throw Expectation.failed("missing CFBundleShortVersionString", #fileID, #line)
+    }
+    let trimmed = version.trimmingCharacters(in: .whitespacesAndNewlines)
+    try expect(!trimmed.isEmpty, "empty marketing version")
+    return trimmed
+}
+
 func expectEqual<T: Equatable>(_ lhs: T, _ rhs: T, file: String = #fileID, line: Int = #line) throws {
     if lhs != rhs {
         throw Expectation.failed("\(lhs) != \(rhs)", file, line)

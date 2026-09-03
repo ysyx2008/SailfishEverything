@@ -38,7 +38,12 @@ enum AppLaunchTests {
 
         let data = try Data(contentsOf: out)
         let report = try JSONDecoder().decode(Report.self, from: data)
-        try expectEqual(report.title, "Sailfish Everything")
+        let repo = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let version = try packagingMarketingVersion(repo: repo)
+        try expectEqual(report.title, "Sailfish Everything \(version)")
         try expect(report.error == nil, report.error ?? "")
         try expect(report.count > 8, "indexed \(report.count)")
 
