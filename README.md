@@ -7,7 +7,7 @@
 打开 `dist/Sailfish Everything.dmg`，把软件拖进应用程序文件夹。从安装盘或下载文件夹直接打开时，软件也会问要不要放到那里。若系统提示无法打开，按住 Control 点图标，再选打开。
 
 ```bash
-bash scripts/run.sh     # 打包并打开
+bash scripts/run.sh     # 打包、装进应用程序并打开
 bash scripts/test.sh    # 跑测试
 ```
 
@@ -26,7 +26,7 @@ If you know Everything on Windows, this is that for Mac.
 Open `dist/Sailfish Everything.dmg` and drag the app into Applications. If you open it from the disk image or Downloads, it will offer to move there. If macOS says it can’t be opened, Control-click the app and choose Open.
 
 ```bash
-bash scripts/run.sh     # package and open
+bash scripts/run.sh     # package, install to Applications, and open
 bash scripts/test.sh    # run tests
 ```
 
