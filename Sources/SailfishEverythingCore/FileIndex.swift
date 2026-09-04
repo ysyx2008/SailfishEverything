@@ -284,11 +284,49 @@ public final class FileIndex: @unchecked Sendable {
         return origNamePack.count
     }
 
+    public func contains(path: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return pathIndex[path] != nil
+    }
+
     public func paths(under folder: String) -> [String] {
         lock.lock()
         let pack = origPathPack
         lock.unlock()
         return pack.paths(under: folder)
+    }
+
+    @discardableResult
+    func addReplacingWalk(
+        root: String,
+        rootPath: String,
+        policy: ScanPolicy,
+        stop: () -> Bool
+    ) -> [FileEntry] {
+        var all: [FileEntry] = []
+        FastWalk.walk(root: root, rootPath: rootPath, policy: policy, stop: stop) { fragment in
+            let entries = Self.entries(from: fragment)
+            guard !entries.isEmpty else { return }
+            _ = self.add(entries, replace: true)
+            all.append(contentsOf: entries)
+        }
+        return all
+    }
+
+    private static func entries(from fragment: IndexFragment) -> [FileEntry] {
+        (0..<fragment.origNamePack.count).compactMap { index in
+            makeEntry(
+                index,
+                names: fragment.origNamePack,
+                paths: fragment.origPathPack,
+                dirs: fragment.dirBits,
+                extras: fragment.extras,
+                sizes: fragment.sizes,
+                modifieds: fragment.modifieds,
+                createds: fragment.createds
+            )
+        }
     }
 
     public func remove(paths: [String]) {

@@ -26,6 +26,8 @@ public final class FileScanner: @unchecked Sendable {
     private let addInflight = DispatchSemaphore(value: 12)
     private var stopFlag = false
     private var eventStream: FSEventStreamRef?
+    private var watchApplyReady = false
+    private var pendingWatch: [(path: String, flags: FSEventStreamEventFlags)] = []
 
     private static let resourceKeys: Set<URLResourceKey> = [
         .isDirectoryKey,
@@ -110,8 +112,13 @@ public final class FileScanner: @unchecked Sendable {
         policy = ScanPolicy.from(settings)
         lastProgressNs = 0
         lastDiagNs = 0
+        watchApplyReady = false
+        pendingWatch.removeAll(keepingCapacity: true)
         DiagnosticLog.shared.event("scan", "begin")
         index.beginBulkLoad()
+        if enableWatch {
+            startEvents()
+        }
 
         notify { delegate in
             delegate.scanner(self, didBeginPhase: L10n.t(.homeFolder))
@@ -162,8 +169,23 @@ public final class FileScanner: @unchecked Sendable {
             }
         }
         DiagnosticLog.shared.event("scan", "finish total=\(total)")
-        if !stopFlag, enableWatch {
-            startEvents()
+        if !stopFlag {
+            watchApplyReady = true
+            flushPendingWatch()
+        }
+    }
+
+    public func ingestWatchPaths(_ paths: [String], mustScanSubdirs: Bool = false) {
+        let flags = FSEventStreamEventFlags(
+            mustScanSubdirs ? UInt32(kFSEventStreamEventFlagMustScanSubDirs) : 0
+        )
+        let items = paths.map { (path: $0, flags: flags) }
+        if notifyOnMain {
+            queue.async { [weak self] in
+                self?.applyWatchEvents(items)
+            }
+        } else {
+            applyWatchEvents(items)
         }
     }
 
@@ -367,18 +389,17 @@ public final class FileScanner: @unchecked Sendable {
                     count: count
                 )
                 let flags = UnsafeBufferPointer(start: flagsPointer, count: count)
-                var changed: [String] = []
+                var changed: [(path: String, flags: FSEventStreamEventFlags)] = []
                 changed.reserveCapacity(count)
                 for i in 0..<count {
-                    changed.append(String(cString: paths[i]))
-                    _ = flags[i]
+                    changed.append((String(cString: paths[i]), flags[i]))
                 }
                 scanner.handleFSEvents(changed)
             },
             &context,
             paths,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            0.8,
+            0.2,
             FSEventStreamCreateFlags(
                 kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer
             )
@@ -398,44 +419,80 @@ public final class FileScanner: @unchecked Sendable {
         }
     }
 
-    private func handleFSEvents(_ paths: [String]) {
+    private func handleFSEvents(_ events: [(path: String, flags: FSEventStreamEventFlags)]) {
         if stopFlag { return }
+        if !watchApplyReady {
+            pendingWatch.append(contentsOf: events)
+            return
+        }
+        applyWatchEvents(events)
+    }
+
+    private func flushPendingWatch() {
+        guard !pendingWatch.isEmpty else { return }
+        let events = pendingWatch
+        pendingWatch.removeAll(keepingCapacity: true)
+        applyWatchEvents(events)
+    }
+
+    private func applyWatchEvents(_ events: [(path: String, flags: FSEventStreamEventFlags)]) {
+        if stopFlag || events.isEmpty { return }
         var added: [FileEntry] = []
         var removed: [String] = []
+        var walked = Set<String>()
+        let extras = extraWatchRoots()
 
-        for raw in paths {
-            let path = URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
+        for event in events {
+            if stopFlag { return }
+            let raw = event.path
+            let flags = event.flags
+            let needsTree = Self.needsSubtreeScan(flags)
+            let path = alignWatchPath(raw, extras: extras)
+
             var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
-                || FileManager.default.fileExists(atPath: raw, isDirectory: &isDir) {
-                let url = URL(fileURLWithPath: path, isDirectory: isDir.boolValue)
-                let relative = relativePath(path)
-                let name = url.lastPathComponent
-                if policy.shouldSkipDescending(relative: relative, name: name) {
+            let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+                || FileManager.default.fileExists(atPath: raw, isDirectory: &isDir)
+
+            if exists {
+                if shouldIgnoreWatch(path, extras: extras) { continue }
+                if needsTree, isDir.boolValue, path != rootPath, walked.insert(path).inserted {
+                    added.append(contentsOf: collectTree(at: path))
+                    removed.append(contentsOf: missingKnown(under: path))
                     continue
                 }
+                let url = URL(fileURLWithPath: path, isDirectory: isDir.boolValue)
                 if let entry = makeEntry(for: url, keys: Self.resourceKeys) {
                     added.append(entry)
-                }
-                if isDir.boolValue {
-                    added.append(contentsOf: immediateEntries(in: url))
-                    let parent = url.resolvingSymlinksInPath().path
-                    for known in index.paths(under: parent) where !FileManager.default.fileExists(atPath: known) {
-                        removed.append(known)
+                    if isDir.boolValue, !knownPath(path), path != rootPath, walked.insert(path).inserted {
+                        added.append(contentsOf: collectTree(at: path))
+                    } else if isDir.boolValue {
+                        added.append(contentsOf: immediateEntries(in: url))
+                        removed.append(contentsOf: missingKnown(under: path))
                     }
                 }
             } else {
-                let parent = URL(fileURLWithPath: raw).deletingLastPathComponent().resolvingSymlinksInPath().path
-                let name = URL(fileURLWithPath: raw).lastPathComponent
-                removed.append(raw)
-                removed.append(path)
-                removed.append(contentsOf: index.paths(under: raw))
-                removed.append(contentsOf: index.paths(under: path))
-                removed.append(contentsOf: index.paths(under: parent).filter {
-                    URL(fileURLWithPath: $0).lastPathComponent == name
-                })
+                if shouldIgnoreWatch(path, extras: extras), shouldIgnoreWatch(raw, extras: extras) {
+                    continue
+                }
+                let resolved = preferRootStyle(URL(fileURLWithPath: raw).resolvingSymlinksInPath().path)
+                let parent = URL(fileURLWithPath: path).deletingLastPathComponent().path
+                let resolvedParent = preferRootStyle(
+                    URL(fileURLWithPath: raw).deletingLastPathComponent().resolvingSymlinksInPath().path
+                )
+                let name = URL(fileURLWithPath: path).lastPathComponent
+                for candidate in pathAliases(raw) + pathAliases(path) + pathAliases(resolved) {
+                    removed.append(candidate)
+                    removed.append(contentsOf: index.paths(under: candidate))
+                }
+                for folder in Set(pathAliases(parent) + pathAliases(resolvedParent)) {
+                    removed.append(contentsOf: index.paths(under: folder).filter {
+                        URL(fileURLWithPath: $0).lastPathComponent == name
+                    })
+                }
             }
         }
+
+        added = added.filter { FileManager.default.fileExists(atPath: $0.path) }
 
         let watchStart = DispatchTime.now()
         if !removed.isEmpty {
@@ -461,6 +518,140 @@ public final class FileScanner: @unchecked Sendable {
         notify { delegate in
             delegate.scanner(self, didAdd: added, total: total)
         }
+    }
+
+    private static func needsSubtreeScan(_ flags: FSEventStreamEventFlags) -> Bool {
+        let mask = FSEventStreamEventFlags(
+            UInt32(kFSEventStreamEventFlagMustScanSubDirs)
+                | UInt32(kFSEventStreamEventFlagUserDropped)
+                | UInt32(kFSEventStreamEventFlagKernelDropped)
+        )
+        return flags & mask != 0
+    }
+
+    private func extraWatchRoots() -> [String] {
+        let home = URL(fileURLWithPath: rootPath, isDirectory: true)
+        return settings.extraRootURLs(home: home).map(\.path)
+    }
+
+    private func alignWatchPath(_ raw: String, extras: [String]) -> String {
+        let localized = localizeWatchPath(raw, extras: extras)
+        if keepsLocalDesktopForm(localized) { return preferRootStyle(localized) }
+        let resolved = URL(fileURLWithPath: localized).resolvingSymlinksInPath().path
+        if isUnderAnyRoot(resolved, extras: extras) { return preferRootStyle(resolved) }
+        return preferRootStyle(localized)
+    }
+
+    private func preferRootStyle(_ path: String) -> String {
+        if path.hasPrefix("/var/"), rootPath.hasPrefix("/private/var/") {
+            return "/private" + path
+        }
+        if path.hasPrefix("/private/var/"), rootPath.hasPrefix("/var/") {
+            return String(path.dropFirst("/private".count))
+        }
+        return path
+    }
+
+    private func pathAliases(_ path: String) -> [String] {
+        var aliases = [path]
+        if path.hasPrefix("/private/") {
+            aliases.append(String(path.dropFirst("/private".count)))
+        } else if path.hasPrefix("/") {
+            aliases.append("/private" + path)
+        }
+        return aliases
+    }
+
+    private func localizeWatchPath(_ raw: String, extras: [String]) -> String {
+        if let mapped = mapICloudMirror(raw) { return mapped }
+        if isUnderAnyRoot(raw, extras: extras) { return raw }
+        let resolved = URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
+        if let mapped = mapICloudMirror(resolved) { return mapped }
+        if isUnderAnyRoot(resolved, extras: extras) { return resolved }
+        return raw
+    }
+
+    private func keepsLocalDesktopForm(_ path: String) -> Bool {
+        let relative = relativeWithoutResolve(path)
+        for (cloud, local) in Self.icloudMirrors {
+            guard relative == local || relative.hasPrefix(local + "/") else { continue }
+            let localRoot = rootPath + "/" + local
+            let cloudRoot = rootPath + "/" + cloud
+            let localResolved = URL(fileURLWithPath: localRoot).resolvingSymlinksInPath().path
+            let cloudResolved = URL(fileURLWithPath: cloudRoot).resolvingSymlinksInPath().path
+            return localResolved == cloudResolved
+        }
+        return false
+    }
+
+    private func mapICloudMirror(_ path: String) -> String? {
+        let relative = relativeWithoutResolve(path)
+        for (cloud, local) in Self.icloudMirrors {
+            guard relative == cloud || relative.hasPrefix(cloud + "/") else { continue }
+            let localRoot = rootPath + "/" + local
+            let cloudRoot = rootPath + "/" + cloud
+            let localResolved = URL(fileURLWithPath: localRoot).resolvingSymlinksInPath().path
+            let cloudResolved = URL(fileURLWithPath: cloudRoot).resolvingSymlinksInPath().path
+            guard localResolved == cloudResolved else { continue }
+            if relative == cloud { return localRoot }
+            return localRoot + String(relative.dropFirst(cloud.count))
+        }
+        return nil
+    }
+
+    private static let icloudMirrors: [(String, String)] = [
+        ("Library/Mobile Documents/com~apple~CloudDocs/Desktop", "Desktop"),
+        ("Library/Mobile Documents/com~apple~CloudDocs/Documents", "Documents"),
+        ("Library/Mobile Documents/com~apple~CloudDocs/Downloads", "Downloads"),
+    ]
+
+    private func isUnderAnyRoot(_ path: String, extras: [String]) -> Bool {
+        if path == rootPath || path.hasPrefix(rootPath + "/") { return true }
+        return extras.contains { path == $0 || path.hasPrefix($0 + "/") }
+    }
+
+    private func shouldIgnoreWatch(_ path: String, extras: [String]) -> Bool {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        if policy.shouldOmitEntry(name: name) { return true }
+        for extra in extras {
+            if path == extra { return false }
+            if path.hasPrefix(extra + "/") {
+                let relative = String(path.dropFirst(extra.count + 1))
+                return policy.shouldSkipDescending(relative: relative, name: name)
+            }
+        }
+        if path == rootPath { return false }
+        if path.hasPrefix(rootPath + "/") {
+            let relative = String(path.dropFirst(rootPath.count + 1))
+            return policy.shouldSkipDescending(relative: relative, name: name)
+        }
+        return true
+    }
+
+    private func relativeWithoutResolve(_ path: String) -> String {
+        if path == rootPath { return "" }
+        if path.hasPrefix(rootPath + "/") {
+            return String(path.dropFirst(rootPath.count + 1))
+        }
+        return path
+    }
+
+    private func collectTree(at path: String) -> [FileEntry] {
+        index.addReplacingWalk(root: path, rootPath: rootPath, policy: policy, stop: { self.stopFlag })
+    }
+
+    private func knownPath(_ path: String) -> Bool {
+        pathAliases(path).contains { index.contains(path: $0) }
+    }
+
+    private func missingKnown(under folder: String) -> [String] {
+        var missing: [String] = []
+        for alias in pathAliases(folder) {
+            for known in index.paths(under: alias) where !FileManager.default.fileExists(atPath: known) {
+                missing.append(known)
+            }
+        }
+        return missing
     }
 
     deinit {
