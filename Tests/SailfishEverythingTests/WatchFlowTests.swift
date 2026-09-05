@@ -8,6 +8,7 @@ enum WatchFlowTests {
         TestCase(name: "单元.云盘桌面路径按本机那份收录", run: icloudDesktopMapsToLocal),
         TestCase(name: "单元.纳入根里的新文件也能跟上", run: extraRootWatchKeepsFile),
         TestCase(name: "单元.系统说漏了就补扫这一块", run: mustScanSubdirsPicksNestedFile),
+        TestCase(name: "单元.补扫宽目录时名单完整", run: mustScanWideTreeKeepsEveryFile),
         TestCase(name: "单元.家目录可被环境变量改掉", run: runtimeHomeOverride),
     ]}
 
@@ -129,6 +130,28 @@ enum WatchFlowTests {
             mustScanSubdirs: true
         )
         try expect(index.names(matching: "deep-copy").contains("deep-copy.txt"))
+        scanner.stop()
+    }
+
+    private static func mustScanWideTreeKeepsEveryFile() throws {
+        let root = try FixtureHome.make()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = FileIndex()
+        let scanner = FileScanner(index: index, root: root, enableWatch: false, notifyOnMain: false)
+        scanner.scanSynchronously()
+
+        let wide = root.appendingPathComponent("Desktop/Wide", isDirectory: true)
+        for i in 0..<24 {
+            let dir = wide.appendingPathComponent(String(format: "d%02d", i), isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try "body".data(using: .utf8)!.write(to: dir.appendingPathComponent("leaf-\(i).txt"))
+        }
+
+        scanner.ingestWatchPaths([wide.path], mustScanSubdirs: true)
+        for i in 0..<24 {
+            let name = "leaf-\(i).txt"
+            try expect(index.names(matching: "leaf-\(i)").contains(name), "missing \(name)")
+        }
         scanner.stop()
     }
 

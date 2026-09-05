@@ -305,11 +305,16 @@ public final class FileIndex: @unchecked Sendable {
         stop: () -> Bool
     ) -> [FileEntry] {
         var all: [FileEntry] = []
+        let collected = NSLock()
         FastWalk.walk(root: root, rootPath: rootPath, policy: policy, stop: stop) { fragment in
             let entries = Self.entries(from: fragment)
             guard !entries.isEmpty else { return }
             _ = self.add(entries, replace: true)
+            // FastWalk may emit from concurrent workers; the index lock
+            // does not cover this local array.
+            collected.lock()
             all.append(contentsOf: entries)
+            collected.unlock()
         }
         return all
     }
